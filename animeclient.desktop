@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=AniCli Flutter
+Exec=animeclient
+Icon=logo
+Type=Application
+Categories=Utility;
+Comment=A Cozy Anime Client
+Terminal=false
