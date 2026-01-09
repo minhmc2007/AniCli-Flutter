@@ -583,7 +583,7 @@ class AboutView extends StatelessWidget {
           const SizedBox(height: 30),
           Text("AniCli Flutter", style: GoogleFonts.inter(fontSize: 32, fontWeight: FontWeight.bold, color: kColorDarkText)).animate().fadeIn(delay: 200.ms).slideY(begin: 0.5, end: 0),
           const SizedBox(height: 5),
-          Text("v2.1 (Mobile & Desktop)", style: GoogleFonts.inter(fontSize: 14, color: kColorCoral, fontWeight: FontWeight.w600)).animate().fadeIn(delay: 400.ms).slideY(begin: 0.5, end: 0),
+          Text("v1.5 Stable", style: GoogleFonts.inter(fontSize: 14, color: kColorCoral, fontWeight: FontWeight.w600)).animate().fadeIn(delay: 400.ms).slideY(begin: 0.5, end: 0),
         ],
       ),
     );
