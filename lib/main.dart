@@ -1,21 +1,31 @@
+import 'dart:io';
+import 'dart:ui';
 import 'package:animeclient/api/ani_core.dart';
 import 'package:animeclient/user_provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+import 'package:media_kit/media_kit.dart';
+import 'package:media_kit_video/media_kit_video.dart';
 import 'package:provider/provider.dart';
-import 'package:url_launcher/url_launcher.dart'; // Added for GitHub link
 
 // --- THEME COLORS ---
-const kColorCream = Color(0xFFFEEAC9); // Main Background
-const kColorPeach = Color(0xFFFFCDC9); // Secondary Gradient
-const kColorSoftPink = Color(0xFFFDACAC); // Borders/Accents
-const kColorCoral = Color(0xFFFD7979); // Primary/Buttons
-const kColorDarkText = Color(0xFF4A2B2B); // Text Color
+const kColorCream = Color(0xFFFEEAC9);
+const kColorPeach = Color(0xFFFFCDC9);
+const kColorSoftPink = Color(0xFFFDACAC);
+const kColorCoral = Color(0xFFFD7979);
+const kColorDarkText = Color(0xFF4A2B2B);
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  MediaKit.ensureInitialized();
+
+  // Lock orientation to portrait on mobile for better UX, or allow both if desired
+  // SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+
   runApp(
     MultiProvider(
       providers: [
@@ -32,7 +42,7 @@ class AniCliApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Ani-Cli Flutter',
+      title: 'AniCli Flutter',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         brightness: Brightness.light,
@@ -49,7 +59,52 @@ class AniCliApp extends StatelessWidget {
   }
 }
 
-// --- LIVE BACKGROUND WIDGET ---
+// --- LIQUID GLASS WIDGET ---
+class LiquidGlassContainer extends StatelessWidget {
+  final Widget child;
+  final double blur;
+  final double opacity;
+  final BorderRadius? borderRadius;
+  final Border? border;
+
+  const LiquidGlassContainer({
+    super.key,
+    required this.child,
+    this.blur = 15.0,
+    this.opacity = 0.4,
+    this.borderRadius,
+    this.border,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final rRadius = borderRadius ?? BorderRadius.circular(20);
+    return ClipRRect(
+      borderRadius: rRadius,
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(opacity),
+            borderRadius: rRadius,
+            border: border ?? Border.all(color: Colors.white.withOpacity(0.6), width: 1.5),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                Colors.white.withOpacity(0.6),
+                Colors.white.withOpacity(0.1),
+              ],
+            ),
+          ),
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
+// --- LIVE BACKGROUND ---
 class LiveGradientBackground extends StatefulWidget {
   final Widget child;
   const LiveGradientBackground({super.key, required this.child});
@@ -123,70 +178,118 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   int _selectedIndex = 0;
-  AnimeModel? _openedAnime;
+
+  final GlobalKey<_BrowseViewState> _browseKey = GlobalKey();
+  final GlobalKey<_HistoryViewState> _historyKey = GlobalKey();
+  final GlobalKey<_FavoritesViewState> _favKey = GlobalKey();
+
+  AnimeModel? _detailAnime;
 
   void _openDetail(AnimeModel anime) {
-    setState(() => _openedAnime = anime);
+    setState(() => _detailAnime = anime);
   }
 
   void _closeDetail() {
-    setState(() => _openedAnime = null);
+    setState(() => _detailAnime = null);
   }
 
   @override
   Widget build(BuildContext context) {
+    // Check Screen Size
+    final isMobile = MediaQuery.of(context).size.width < 900;
+
+    Widget activePage;
+    Key activeKey;
+
+    switch (_selectedIndex) {
+      case 0:
+        activePage = BrowseView(key: _browseKey, onAnimeTap: _openDetail);
+        activeKey = const ValueKey("BrowseTab");
+        break;
+      case 1:
+        activePage = HistoryView(key: _historyKey, onAnimeTap: _openDetail);
+        activeKey = const ValueKey("HistoryTab");
+        break;
+      case 2:
+        activePage = FavoritesView(key: _favKey, onAnimeTap: _openDetail);
+        activeKey = const ValueKey("FavTab");
+        break;
+      case 3:
+      default:
+        activePage = const AboutView(key: ValueKey("AboutTab"));
+        activeKey = const ValueKey("AboutTab");
+        break;
+    }
+
     return Scaffold(
       body: LiveGradientBackground(
         child: Stack(
           children: [
-            // Main Content Area
+            // BACKGROUND TAB CONTENT
             AnimatedSwitcher(
-              duration: const Duration(milliseconds: 600),
-              switchInCurve: Curves.easeOutCubic,
-                switchOutCurve: Curves.easeInCubic,
+              duration: const Duration(milliseconds: 500),
+              switchInCurve: Curves.easeOutQuart,
+                switchOutCurve: Curves.easeInQuart,
                   transitionBuilder: (child, animation) {
                     return FadeTransition(
                       opacity: animation,
                       child: SlideTransition(
                         position: Tween<Offset>(
-                          begin: const Offset(0.0, 0.05),
-                          end: Offset.zero,
+                          begin: const Offset(0.05, 0),
+                          end: Offset.zero
                         ).animate(animation),
                         child: child,
                       ),
                     );
                   },
-                  child: _openedAnime != null
-                  ? AnimeDetailView(
-                    key: ValueKey(_openedAnime!.id),
-                    anime: _openedAnime!,
-                    onBack: _closeDetail,
-                  )
-                  : IndexedStack(
-                    key: const ValueKey('tabs'),
-                    index: _selectedIndex,
-                    children: [
-                      BrowseView(onAnimeTap: _openDetail),
-                      HistoryView(onAnimeTap: _openDetail),
-                      FavoritesView(onAnimeTap: _openDetail),
-                      const AboutView(),
-                    ],
+                  child: KeyedSubtree(
+                    key: activeKey,
+                    child: activePage
                   ),
             ),
 
-            // Bottom Dock
-            if (_openedAnime == null)
-              Positioned(
-                bottom: 30,
-                left: 0,
-                right: 0,
-                child: Center(
-                  child: GlassDock(
-                    selectedIndex: _selectedIndex,
-                    onItemSelected: (index) => setState(() => _selectedIndex = index),
-                  ),
+            // DETAIL VIEW OVERLAY
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 500),
+              switchInCurve: Curves.easeOutQuart,
+                switchOutCurve: Curves.easeInQuart,
+                  transitionBuilder: (child, animation) {
+                    return SlideTransition(
+                      position: Tween<Offset>(begin: const Offset(0, 0.1), end: Offset.zero).animate(animation),
+                      child: FadeTransition(opacity: animation, child: child),
+                    );
+                  },
+                  child: _detailAnime != null
+                  ? Scaffold(
+                    backgroundColor: Colors.transparent,
+                    body: AnimeDetailView(
+                      key: ValueKey("Detail_${_detailAnime!.id}"),
+                      anime: _detailAnime!,
+                      onBack: _closeDetail,
+                      isMobile: isMobile, // PASS SCREEN STATE
+                    ),
+                  )
+                  : const SizedBox.shrink(),
+            ),
+
+            // DOCK
+            AnimatedPositioned(
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeOutBack,
+              bottom: _detailAnime == null ? 30 : -100,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: GlassDock(
+                  selectedIndex: _selectedIndex,
+                  onItemSelected: (index) {
+                    if (_detailAnime == null) {
+                      setState(() => _selectedIndex = index);
+                    }
+                  },
                 ),
-              ).animate().slideY(begin: 1, end: 0, delay: 300.ms, curve: Curves.easeOutBack),
+              ),
+            ),
           ],
         ),
       ),
@@ -194,79 +297,204 @@ class _MainScreenState extends State<MainScreen> {
   }
 }
 
-// --- VIEW: BROWSE ---
-class BrowseView extends StatefulWidget {
-  final Function(AnimeModel) onAnimeTap;
-  const BrowseView({super.key, required this.onAnimeTap});
+// --- PLAYER SCREEN ---
+class InternalPlayerScreen extends StatefulWidget {
+  final String streamUrl;
+  final String title;
+
+  const InternalPlayerScreen({super.key, required this.streamUrl, required this.title});
 
   @override
-  State<BrowseView> createState() => _BrowseViewState();
+  State<InternalPlayerScreen> createState() => _InternalPlayerScreenState();
 }
 
-class _BrowseViewState extends State<BrowseView> {
-  final TextEditingController _searchCtrl = TextEditingController();
-  List<AnimeModel> _animes = [];
-  bool _isLoading = false;
+class _InternalPlayerScreenState extends State<InternalPlayerScreen> {
+  late final Player player;
+  late final VideoController controller;
 
-  void _doSearch(String query) async {
-    if (query.isEmpty) return;
-    setState(() => _isLoading = true);
-    final results = await AniCore.search(query);
-    if (mounted) setState(() { _animes = results; _isLoading = false; });
+  @override
+  void initState() {
+    super.initState();
+    player = Player();
+    controller = VideoController(player);
+    player.open(Media(
+      widget.streamUrl,
+      httpHeaders: {'Referer': AniCore.referer},
+    ));
+    player.play();
+    player.setVolume(100);
+  }
+
+  @override
+  void dispose() {
+    player.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: Center(
+        child: MaterialVideoControlsTheme(
+          normal: MaterialVideoControlsThemeData(
+            seekBarThumbColor: kColorCoral,
+            seekBarPositionColor: kColorCoral,
+            buttonBarButtonColor: Colors.white,
+            topButtonBar: [
+              const SizedBox(width: 20),
+              Expanded(child: Text(widget.title, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
+              IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close, color: Colors.white))
+            ]
+          ),
+          fullscreen: const MaterialVideoControlsThemeData(
+            seekBarThumbColor: kColorCoral,
+            seekBarPositionColor: kColorCoral,
+            buttonBarButtonColor: Colors.white,
+          ),
+          child: Video(
+            controller: controller,
+            controls: MaterialVideoControls,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// --- VIEWS ---
+
+class BrowseView extends StatefulWidget {
+  final Function(AnimeModel) onAnimeTap;
+  const BrowseView({super.key, required this.onAnimeTap});
+  @override
+  State<BrowseView> createState() => _BrowseViewState();
+}
+class _BrowseViewState extends State<BrowseView> with AutomaticKeepAliveClientMixin {
+  final TextEditingController _searchCtrl = TextEditingController();
+  List<AnimeModel> _animes = [];
+  bool _isLoading = true;
+  String _currentQuery = "";
+  @override
+  bool get wantKeepAlive => true;
+  @override
+  void initState() {
+    super.initState();
+    _loadTrending();
+  }
+  void _loadTrending() async {
+    setState(() => _isLoading = true);
+    final results = await AniCore.getTrending();
+    if (mounted) setState(() { _animes = results; _isLoading = false; });
+  }
+  void _doSearch(String query) async {
+    if (query.isEmpty) {
+      _currentQuery = ""; _loadTrending(); return;
+    }
+    _currentQuery = query;
+    setState(() => _isLoading = true);
+    final results = await AniCore.search(query);
+    if (mounted) setState(() { _animes = results; _isLoading = false; });
+  }
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    final isMobile = MediaQuery.of(context).size.width < 900;
+
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const SizedBox(height: 60),
+        const SizedBox(height: 50),
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 50),
-          child: Container(
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.4),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: Colors.white, width: 2),
-              boxShadow: [
-                BoxShadow(color: kColorCoral.withOpacity(0.1), blurRadius: 20, offset: const Offset(0, 10))
-              ],
-            ),
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: TextField(
-              controller: _searchCtrl,
-              style: const TextStyle(color: kColorDarkText, fontWeight: FontWeight.w600),
-              decoration: const InputDecoration(
-                hintText: "Search Anime...",
-                hintStyle: TextStyle(color: Colors.black38),
-                border: InputBorder.none,
-                icon: Icon(LucideIcons.search, color: kColorCoral),
-              ),
-              onSubmitted: _doSearch,
-            ),
+          padding: EdgeInsets.symmetric(horizontal: isMobile ? 20 : 40),
+          child: Row(
+            children: [
+              if (_currentQuery.isNotEmpty)
+                Padding(padding: const EdgeInsets.only(right: 15),
+                child: IconButton(
+                  onPressed: () { _searchCtrl.clear(); _currentQuery = ""; _doSearch(""); },
+                  icon: const Icon(LucideIcons.arrowLeftCircle, color: kColorCoral, size: 32)
+                ),
+                ).animate().scale().fadeIn(),
+                Expanded(
+                  child: LiquidGlassContainer(
+                    borderRadius: BorderRadius.circular(20),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      child: TextField(
+                        controller: _searchCtrl,
+                        style: const TextStyle(color: kColorDarkText, fontWeight: FontWeight.w600),
+                        decoration: const InputDecoration(
+                          hintText: "Search Anime...",
+                          hintStyle: TextStyle(color: Colors.black38),
+                          border: InputBorder.none,
+                          icon: Icon(LucideIcons.search, color: kColorCoral),
+                        ),
+                        onSubmitted: _doSearch,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
           ),
         ).animate().fadeIn().slideY(begin: -0.5, end: 0),
-
         const SizedBox(height: 20),
         Expanded(
-          child: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: kColorCoral))
-          : _animes.isEmpty
-          ? Center(child: Text("Search for something...", style: GoogleFonts.inter(color: Colors.black26)))
-          : AnimeGrid(animes: _animes, onTap: widget.onAnimeTap),
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 500),
+            switchInCurve: Curves.easeOutQuart,
+              switchOutCurve: Curves.easeInQuart,
+                transitionBuilder: (child, animation) {
+                  return FadeTransition(opacity: animation, child: ScaleTransition(scale: Tween<double>(begin: 0.98, end: 1.0).animate(animation), child: child));
+                },
+                child: _isLoading
+                ? const Center(child: CircularProgressIndicator(color: kColorCoral))
+                : KeyedSubtree(
+                  key: ValueKey(_currentQuery.isEmpty ? "Trending" : "Search"),
+                  child: _animes.isEmpty
+                  ? Center(child: Text("No results found.", style: GoogleFonts.inter(color: Colors.black26)))
+                  : SingleChildScrollView(
+                    physics: const BouncingScrollPhysics(),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (_currentQuery.isEmpty && _animes.length > 5) ...[
+                          Padding(padding: EdgeInsets.only(left: isMobile ? 20 : 40, bottom: 15),
+                          child: Text("Spotlight", style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.bold, color: kColorCoral)).animate().fadeIn(delay: 200.ms),
+                          ),
+                          FeaturedCarousel(animes: _animes.take(5).toList(), onTap: widget.onAnimeTap),
+                          const SizedBox(height: 30),
+                        ],
+                        Padding(padding: EdgeInsets.only(left: isMobile ? 20 : 40, bottom: 15),
+                        child: Text(_currentQuery.isEmpty ? "Trending Now" : "Search Results", style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.bold, color: kColorDarkText)).animate().fadeIn(delay: 200.ms),
+                        ),
+                        AnimeGrid(animes: _animes, onTap: widget.onAnimeTap),
+                        const SizedBox(height: 120),
+                      ],
+                    ),
+                  ),
+                ),
+          ),
         ),
       ],
     );
   }
 }
 
-// --- VIEW: HISTORY ---
-class HistoryView extends StatelessWidget {
+class HistoryView extends StatefulWidget {
   final Function(AnimeModel) onAnimeTap;
   const HistoryView({super.key, required this.onAnimeTap});
-
+  @override
+  State<HistoryView> createState() => _HistoryViewState();
+}
+class _HistoryViewState extends State<HistoryView> with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final history = context.watch<UserProvider>().history;
+    final isMobile = MediaQuery.of(context).size.width < 900;
 
     return Column(
       children: [
@@ -276,67 +504,33 @@ class HistoryView extends StatelessWidget {
           children: [
             Text("Watch History", style: GoogleFonts.inter(fontSize: 32, fontWeight: FontWeight.bold, color: kColorCoral)),
             if (history.isNotEmpty)
-              IconButton(
-                icon: const Icon(LucideIcons.trash2, size: 20, color: kColorDarkText),
-                onPressed: () => context.read<UserProvider>().clearHistory(),
-                tooltip: "Clear History",
-              )
+              Padding(
+                padding: const EdgeInsets.only(left: 10),
+                child: IconButton(
+                  icon: const Icon(LucideIcons.trash2, size: 20, color: kColorDarkText),
+                  onPressed: () => context.read<UserProvider>().clearHistory(),
+                ),
+              ).animate().scale()
           ],
-        ),
+        ).animate().fadeIn().slideY(begin: -0.5, end: 0),
         const SizedBox(height: 20),
         Expanded(
           child: history.isEmpty
-          ? Center(child: Text("Go watch some anime!", style: GoogleFonts.inter(color: Colors.black26)))
+          ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Icon(LucideIcons.ghost, size: 60, color: kColorCoral.withOpacity(0.5)).animate(onPlay: (c) => c.repeat(reverse: true)).slideY(begin: -0.1, end: 0.1, duration: 2.seconds),
+            const SizedBox(height: 10),
+            Text("Nothing here yet...", style: GoogleFonts.inter(color: Colors.black45, fontSize: 16)),
+          ]))
           : ListView.builder(
-            padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 10),
+            padding: EdgeInsets.symmetric(horizontal: isMobile ? 20 : 40, vertical: 10),
+            physics: const BouncingScrollPhysics(),
             itemCount: history.length,
             itemBuilder: (ctx, i) {
               final item = history[i];
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 15),
-                child: GestureDetector(
-                  onTap: () => onAnimeTap(item.anime),
-                  child: Container(
-                    height: 80,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.6),
-                      borderRadius: BorderRadius.circular(15),
-                      border: Border.all(color: Colors.white),
-                      boxShadow: [
-                        BoxShadow(color: kColorCoral.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))
-                      ],
-                    ),
-                    child: Row(
-                      children: [
-                        ClipRRect(
-                          borderRadius: const BorderRadius.horizontal(left: Radius.circular(15)),
-                          child: CachedNetworkImage(
-                            imageUrl: item.anime.fullImageUrl,
-                            width: 80,
-                            height: 80,
-                            fit: BoxFit.cover,
-                          ),
-                        ),
-                        const SizedBox(width: 20),
-                        Expanded(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(item.anime.name, maxLines: 1, overflow: TextOverflow.ellipsis,
-                                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                                   Text("Last watched: Episode ${item.episode}",
-                                        style: const TextStyle(color: kColorCoral, fontWeight: FontWeight.w600)),
-                            ],
-                          ),
-                        ),
-                        const Icon(LucideIcons.playCircle, color: kColorCoral, size: 30),
-                        const SizedBox(width: 20),
-                      ],
-                    ),
-                  ),
-                ),
-              ).animate().slideX(begin: 0.2, end: 0, delay: (i * 50).ms);
+              return HistoryCard(item: item, onTap: () => widget.onAnimeTap(item.anime))
+              .animate(delay: (i * 100).ms)
+              .slideX(begin: 0.2, end: 0, curve: Curves.easeOutCubic, duration: 500.ms)
+              .fadeIn(duration: 400.ms);
             },
           ),
         ),
@@ -345,136 +539,64 @@ class HistoryView extends StatelessWidget {
   }
 }
 
-// --- VIEW: FAVORITES ---
-class FavoritesView extends StatelessWidget {
+class FavoritesView extends StatefulWidget {
   final Function(AnimeModel) onAnimeTap;
   const FavoritesView({super.key, required this.onAnimeTap});
-
+  @override
+  State<FavoritesView> createState() => _FavoritesViewState();
+}
+class _FavoritesViewState extends State<FavoritesView> with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final favorites = context.watch<UserProvider>().favorites;
-
     return Column(
       children: [
         const SizedBox(height: 60),
-        Text("Favorites", style: GoogleFonts.inter(fontSize: 32, fontWeight: FontWeight.bold, color: kColorCoral)),
+        Text("Favorites", style: GoogleFonts.inter(fontSize: 32, fontWeight: FontWeight.bold, color: kColorCoral))
+        .animate().fadeIn().slideY(begin: -0.5, end: 0),
         const SizedBox(height: 20),
         Expanded(
           child: favorites.isEmpty
           ? Center(child: Text("No favorites yet!", style: GoogleFonts.inter(color: Colors.black26)))
-          : AnimeGrid(animes: favorites, onTap: onAnimeTap),
+          : AnimeGrid(animes: favorites, onTap: widget.onAnimeTap),
         ),
       ],
     );
   }
 }
 
-// --- VIEW: ABOUT (UPDATED) ---
 class AboutView extends StatelessWidget {
   const AboutView({super.key});
-
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(40.0),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Logo / Icon
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.5),
-                shape: BoxShape.circle,
-                border: Border.all(color: Colors.white, width: 2),
-                boxShadow: [
-                  BoxShadow(color: kColorCoral.withOpacity(0.2), blurRadius: 20, offset: const Offset(0, 10))
-                ],
-              ),
-              child: const Icon(LucideIcons.clapperboard, size: 60, color: kColorCoral),
-            ).animate().scale(curve: Curves.easeOutBack, duration: 600.ms),
-
-            const SizedBox(height: 30),
-
-            Text("Ani-Cli Flutter", style: GoogleFonts.inter(fontSize: 32, fontWeight: FontWeight.bold, color: kColorDarkText)),
-            const SizedBox(height: 5),
-            Text("v1.0.0", style: GoogleFonts.inter(fontSize: 14, color: kColorCoral, fontWeight: FontWeight.w600)),
-
-            const SizedBox(height: 30),
-
-            // Info Card
-            Container(
-              padding: const EdgeInsets.all(25),
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.4),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: Colors.white),
-              ),
-              child: Column(
-                children: [
-                  const Text(
-                    "This is an Anime Client based on the modified ani-cli script.",
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 16),
-                  ),
-                  const SizedBox(height: 20),
-
-                  // GitHub Link Button
-                  MouseRegion(
-                    cursor: SystemMouseCursors.click,
-                    child: GestureDetector(
-                      onTap: () async {
-                        final Uri url = Uri.parse('https://github.com/minhmc2007/ani-cli');
-                        if (!await launchUrl(url)) {
-                          debugPrint("Could not launch $url");
-                        }
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                        decoration: BoxDecoration(
-                          color: kColorDarkText,
-                          borderRadius: BorderRadius.circular(30),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(LucideIcons.github, color: kColorCream, size: 20),
-                            const SizedBox(width: 10),
-                            Text("minhmc2007/ani-cli", style: GoogleFonts.inter(color: kColorCream, fontWeight: FontWeight.bold)),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-
-                  const SizedBox(height: 20),
-
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      border: Border.all(color: kColorDarkText.withOpacity(0.3)),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text("License: GPLv3", style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.bold)),
-                  ),
-                ],
-              ),
-            ).animate().slideY(begin: 0.2, end: 0, delay: 200.ms, curve: Curves.easeOutQuart),
-          ],
-        ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          LiquidGlassContainer(
+            borderRadius: BorderRadius.circular(50),
+            child: const Padding(padding: EdgeInsets.all(20), child: Icon(LucideIcons.clapperboard, size: 60, color: kColorCoral)),
+          ).animate().scale(curve: Curves.easeOutBack, duration: 600.ms),
+          const SizedBox(height: 30),
+          Text("AniCli Flutter", style: GoogleFonts.inter(fontSize: 32, fontWeight: FontWeight.bold, color: kColorDarkText)).animate().fadeIn(delay: 200.ms).slideY(begin: 0.5, end: 0),
+          const SizedBox(height: 5),
+          Text("v2.1 (Mobile & Desktop)", style: GoogleFonts.inter(fontSize: 14, color: kColorCoral, fontWeight: FontWeight.w600)).animate().fadeIn(delay: 400.ms).slideY(begin: 0.5, end: 0),
+        ],
       ),
     );
   }
 }
 
-// --- VIEW: DETAILS & PLAYER ---
+// --- RESPONSIVE DETAIL VIEW ---
 class AnimeDetailView extends StatefulWidget {
   final AnimeModel anime;
   final VoidCallback onBack;
+  final bool isMobile; // DETECTED FROM MAIN SCREEN
 
-  const AnimeDetailView({super.key, required this.anime, required this.onBack});
-
+  const AnimeDetailView({super.key, required this.anime, required this.onBack, required this.isMobile});
   @override
   State<AnimeDetailView> createState() => _AnimeDetailViewState();
 }
@@ -483,6 +605,7 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
   List<String> _episodes = [];
   bool _isLoading = true;
   String? _loadingStatus;
+  bool _isDownloadMode = false;
 
   @override
   void initState() {
@@ -495,162 +618,251 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
     if (mounted) setState(() { _episodes = eps; _isLoading = false; });
   }
 
-  void _playEpisode(String epNum) async {
-    setState(() => _loadingStatus = "Opening Player...");
-    context.read<UserProvider>().addToHistory(widget.anime, epNum);
-    final url = await AniCore.getStreamUrl(widget.anime.id, epNum);
-    setState(() => _loadingStatus = null);
-
-    if (url != null) {
-      AniCore.playInMpv(url);
+  Future<void> _handleEpisodeTap(String epNum) async {
+    if (_isDownloadMode) {
+      if (Platform.isAndroid || Platform.isIOS) {
+        if(mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Download unavailable on mobile yet.")));
+        return;
+      }
+      setState(() => _loadingStatus = "Preparing Download...");
+      final url = await AniCore.getStreamUrl(widget.anime.id, epNum);
+      setState(() => _loadingStatus = null);
+      if (url != null) {
+        String safeName = "${widget.anime.name} - EP$epNum".replaceAll(RegExp(r'[<>:"/\\|?*]'), '');
+        AniCore.downloadEpisode(url, safeName);
+        if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Downloading Episode $epNum via Aria2c..."), backgroundColor: kColorCoral));
+      } else {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Download link not found")));
+      }
     } else {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Stream not found")));
+      setState(() => _loadingStatus = "Fetching Stream...");
+      context.read<UserProvider>().addToHistory(widget.anime, epNum);
+      final url = await AniCore.getStreamUrl(widget.anime.id, epNum);
+      setState(() => _loadingStatus = null);
+
+      if (url != null) {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => InternalPlayerScreen(
+              streamUrl: url,
+              title: "${widget.anime.name} - Ep $epNum"
+            ),
+          ),
+        );
+      } else {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Stream not found")));
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final isFav = context.watch<UserProvider>().isFavorite(widget.anime.id);
-
     return Stack(
       children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: 350,
-              height: double.infinity,
-              padding: const EdgeInsets.all(40),
-              child: Column(
-                children: [
-                  const SizedBox(height: 40),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      _buildCircleBtn(LucideIcons.arrowLeft, widget.onBack),
-                      _buildCircleBtn(
-                        isFav ? LucideIcons.heart : LucideIcons.heart,
-                        () => context.read<UserProvider>().toggleFavorite(widget.anime),
-                        color: isFav ? kColorCoral : Colors.black26,
-                        fill: isFav,
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                  Hero(
-                    tag: widget.anime.id,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(20),
-                        boxShadow: [
-                          BoxShadow(color: kColorCoral.withOpacity(0.4), blurRadius: 20, offset: const Offset(0, 10))
-                        ],
-                      ),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(20),
-                        child: CachedNetworkImage(
-                          imageUrl: widget.anime.fullImageUrl,
-                          fit: BoxFit.cover,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  Text(
-                    widget.anime.name,
-                    textAlign: TextAlign.center,
-                    style: GoogleFonts.inter(fontSize: 22, fontWeight: FontWeight.bold, color: kColorDarkText),
-                  ),
-                ],
-              ),
-            ),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const SizedBox(height: 100),
-                  Text("Episodes", style: GoogleFonts.inter(fontSize: 28, fontWeight: FontWeight.bold, color: kColorCoral)),
-                  const SizedBox(height: 20),
-                  Expanded(
-                    child: _isLoading
-                    ? const Center(child: CircularProgressIndicator(color: kColorCoral))
-                    : GridView.builder(
-                      padding: const EdgeInsets.only(right: 40, bottom: 40),
-                      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                        maxCrossAxisExtent: 100,
-                        childAspectRatio: 1.5,
-                        crossAxisSpacing: 10,
-                        mainAxisSpacing: 10,
-                      ),
-                      itemCount: _episodes.length,
-                      itemBuilder: (ctx, i) {
-                        return EpisodeChip(
-                          epNum: _episodes[i],
-                          onTap: () => _playEpisode(_episodes[i]),
-                        );
-                      },
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        if (_loadingStatus != null)
-          Container(
-            color: kColorCream.withOpacity(0.8),
-            child: Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const CircularProgressIndicator(color: kColorCoral),
-                  const SizedBox(height: 20),
-                  Text(_loadingStatus!, style: const TextStyle(fontSize: 18, color: kColorCoral, fontWeight: FontWeight.bold)),
-                ],
-              ),
-            ),
-          ),
+        // Background
+        Container(decoration: BoxDecoration(gradient: LinearGradient(colors: [kColorCream.withOpacity(0.95), kColorPeach.withOpacity(0.95)], begin: Alignment.topLeft, end: Alignment.bottomRight))),
+
+        // Layout Switch
+        widget.isMobile ? _buildMobileLayout() : _buildDesktopLayout(),
+
+        // Loading Overlay
+        if (_loadingStatus != null) Positioned.fill(child: LiquidGlassContainer(blur: 20, opacity: 0.8, borderRadius: BorderRadius.zero, child: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [const CircularProgressIndicator(color: kColorCoral), const SizedBox(height: 20), Text(_loadingStatus!, style: const TextStyle(fontSize: 18, color: kColorCoral, fontWeight: FontWeight.bold))])))),
       ],
     );
   }
 
-  Widget _buildCircleBtn(IconData icon, VoidCallback onTap, {Color color = kColorCoral, bool fill = false}) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          shape: BoxShape.circle,
-          boxShadow: [BoxShadow(color: kColorCoral.withOpacity(0.2), blurRadius: 10)],
-        ),
-        child: Icon(icon, color: color, fill: fill ? 1.0 : 0.0),
-      ),
+  // --- DESKTOP LAYOUT (Original) ---
+  Widget _buildDesktopLayout() {
+    final isFav = context.watch<UserProvider>().isFavorite(widget.anime.id);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(width: 350, height: double.infinity, padding: const EdgeInsets.all(40), child: Column(children: [
+          const SizedBox(height: 40),
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            _buildCircleBtn(LucideIcons.arrowLeft, widget.onBack),
+            _buildCircleBtn(isFav ? LucideIcons.heart : LucideIcons.heart, () => context.read<UserProvider>().toggleFavorite(widget.anime), color: isFav ? kColorCoral : Colors.black26, fill: isFav),
+          ]),
+          const SizedBox(height: 30),
+          Hero(tag: widget.anime.id, child: Container(decoration: BoxDecoration(borderRadius: BorderRadius.circular(25), boxShadow: [BoxShadow(color: kColorCoral.withOpacity(0.4), blurRadius: 25, offset: const Offset(0, 10))]), child: ClipRRect(borderRadius: BorderRadius.circular(25), child: CachedNetworkImage(imageUrl: widget.anime.fullImageUrl, fit: BoxFit.cover)))).animate().slideX(begin: -0.2, end: 0, duration: 400.ms, curve: Curves.easeOut),
+          const SizedBox(height: 25),
+          Text(widget.anime.name, textAlign: TextAlign.center, style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.bold, color: kColorDarkText)).animate().fadeIn(delay: 200.ms),
+        ])),
+        Expanded(child: Padding(padding: const EdgeInsets.only(top: 80, right: 40, bottom: 40), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            Text("Episodes", style: GoogleFonts.inter(fontSize: 32, fontWeight: FontWeight.bold, color: kColorCoral)).animate().fadeIn().slideY(begin: -0.5, end: 0),
+            MorphingDownloadButton(isDownloading: _isDownloadMode, onToggle: () => setState(() => _isDownloadMode = !_isDownloadMode)),
+          ]),
+          const SizedBox(height: 20),
+          Expanded(child: _buildEpisodeGrid()),
+        ]))),
+      ],
     );
+  }
+
+  // --- MOBILE LAYOUT (New Vertical Stack) ---
+  Widget _buildMobileLayout() {
+    final isFav = context.watch<UserProvider>().isFavorite(widget.anime.id);
+    return CustomScrollView(
+      physics: const BouncingScrollPhysics(),
+      slivers: [
+        // App Bar / Image Area
+        SliverToBoxAdapter(
+          child: Stack(
+            children: [
+              // Hero Image as Background Header
+              Hero(
+                tag: widget.anime.id,
+                child: SizedBox(
+                  height: 350,
+                  width: double.infinity,
+                  child: ShaderMask(
+                    shaderCallback: (rect) {
+                      return LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [Colors.black, Colors.transparent],
+                        stops: const [0.6, 1.0],
+                      ).createShader(Rect.fromLTRB(0, 0, rect.width, rect.height));
+                    },
+                    blendMode: BlendMode.dstIn,
+                    child: CachedNetworkImage(
+                      imageUrl: widget.anime.fullImageUrl,
+                      fit: BoxFit.cover,
+                      alignment: Alignment.topCenter,
+                    ),
+                  ),
+                ),
+              ),
+              // Buttons on top
+              Positioned(
+                top: 50,
+                left: 20,
+                right: 20,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    _buildCircleBtn(LucideIcons.arrowLeft, widget.onBack),
+                    _buildCircleBtn(isFav ? LucideIcons.heart : LucideIcons.heart, () => context.read<UserProvider>().toggleFavorite(widget.anime), color: isFav ? kColorCoral : Colors.black26, fill: isFav),
+                  ],
+                ),
+              ),
+              // Title on image
+              Positioned(
+                bottom: 20,
+                left: 20,
+                right: 20,
+                child: Text(
+                  widget.anime.name,
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.bold, color: kColorDarkText, shadows: [Shadow(blurRadius: 10, color: Colors.white.withOpacity(0.5))])
+                ).animate().fadeIn().slideY(begin: 0.2, end: 0),
+              )
+            ],
+          ),
+        ),
+
+        // Controls
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text("Episodes", style: GoogleFonts.inter(fontSize: 28, fontWeight: FontWeight.bold, color: kColorCoral)),
+                MorphingDownloadButton(isDownloading: _isDownloadMode, onToggle: () => setState(() => _isDownloadMode = !_isDownloadMode)),
+              ],
+            ),
+          ),
+        ),
+
+        // Episode Grid
+        SliverPadding(
+          padding: const EdgeInsets.only(left: 20, right: 20, bottom: 100),
+          sliver: _isLoading
+          ? const SliverToBoxAdapter(child: Center(child: CircularProgressIndicator(color: kColorCoral)))
+          : SliverGrid(
+            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+              maxCrossAxisExtent: 90, // Smaller for mobile
+              childAspectRatio: 1.5,
+              crossAxisSpacing: 10,
+              mainAxisSpacing: 10,
+            ),
+            delegate: SliverChildBuilderDelegate(
+              (context, i) {
+                return EpisodeChip(epNum: _episodes[i], isDownloadMode: _isDownloadMode, onTap: () => _handleEpisodeTap(_episodes[i])).animate().scale(delay: (i * 10).ms, duration: 200.ms);
+              },
+              childCount: _episodes.length,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildEpisodeGrid() {
+    return _isLoading
+    ? const Center(child: CircularProgressIndicator(color: kColorCoral))
+    : GridView.builder(
+      physics: const BouncingScrollPhysics(),
+      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent: 100, childAspectRatio: 1.5, crossAxisSpacing: 15, mainAxisSpacing: 15),
+      itemCount: _episodes.length,
+      itemBuilder: (ctx, i) {
+        return EpisodeChip(epNum: _episodes[i], isDownloadMode: _isDownloadMode, onTap: () => _handleEpisodeTap(_episodes[i])).animate().scale(delay: (i * 20).ms, duration: 200.ms);
+      });
+  }
+
+  Widget _buildCircleBtn(IconData icon, VoidCallback onTap, {Color color = kColorCoral, bool fill = false}) {
+    return GestureDetector(onTap: onTap, child: LiquidGlassContainer(borderRadius: BorderRadius.circular(50), child: Container(padding: const EdgeInsets.all(12), child: Icon(icon, color: color, fill: fill ? 1.0 : 0.0))));
   }
 }
 
 // --- SHARED WIDGETS ---
+class MorphingDownloadButton extends StatelessWidget {
+  final bool isDownloading;
+  final VoidCallback onToggle;
+  const MorphingDownloadButton({super.key, required this.isDownloading, required this.onToggle});
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(duration: const Duration(milliseconds: 600), curve: Curves.easeOutBack, tween: Tween(begin: 0.0, end: isDownloading ? 1.0 : 0.0), builder: (context, t, child) {
+      final width = lerpDouble(50, 240, t)!;
+      return GestureDetector(onTap: onToggle, child: Container(width: width, height: 50, decoration: BoxDecoration(color: Color.lerp(Colors.white, kColorCoral, t)!, borderRadius: BorderRadius.circular(lerpDouble(25, 15, t)!), boxShadow: [BoxShadow(color: kColorCoral.withOpacity(0.2 + (t * 0.2)), blurRadius: 15, offset: const Offset(0, 5))]),
+      child: ClipRect(child: Stack(alignment: Alignment.center, children: [
+        Opacity(opacity: (1.0 - t).clamp(0.0, 1.0), child: Transform.translate(offset: Offset(-20 * t, 0), child: Icon(LucideIcons.download, color: Color.lerp(kColorCoral, Colors.white, t)!))),
+        Opacity(opacity: t.clamp(0.0, 1.0), child: Transform.translate(offset: Offset(20 * (1.0 - t), 0), child: SingleChildScrollView(scrollDirection: Axis.horizontal, physics: const NeverScrollableScrollPhysics(), child: Container(width: 240, padding: const EdgeInsets.symmetric(horizontal: 16), child: Row(mainAxisAlignment: MainAxisAlignment.center, children: const [Icon(LucideIcons.downloadCloud, color: Colors.white, size: 18), SizedBox(width: 8), Text("Select Ep to Download", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)), SizedBox(width: 5), Icon(LucideIcons.x, color: Colors.white70, size: 16)]))))),
+      ]))));
+    });
+  }
+}
+
 class AnimeGrid extends StatelessWidget {
   final List<AnimeModel> animes;
   final Function(AnimeModel) onTap;
-
   const AnimeGrid({super.key, required this.animes, required this.onTap});
-
   @override
   Widget build(BuildContext context) {
-    return GridView.builder(
-      padding: const EdgeInsets.fromLTRB(40, 0, 40, 120),
-      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-        maxCrossAxisExtent: 180,
-        childAspectRatio: 0.7,
-        crossAxisSpacing: 20,
-        mainAxisSpacing: 20,
+    final isMobile = MediaQuery.of(context).size.width < 900;
+
+    // Responsive Padding and Grid Size
+    return Padding(
+      padding: EdgeInsets.symmetric(horizontal: isMobile ? 20 : 40),
+      child: GridView.builder(
+        physics: const NeverScrollableScrollPhysics(),
+        shrinkWrap: true,
+        gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+          maxCrossAxisExtent: isMobile ? 150 : 180, // Smaller cards on mobile
+          childAspectRatio: 0.7,
+          crossAxisSpacing: isMobile ? 15 : 20,
+          mainAxisSpacing: isMobile ? 15 : 20
+        ),
+        itemCount: animes.length,
+        itemBuilder: (ctx, i) {
+          return AnimeCard(anime: animes[i], onTap: () => onTap(animes[i]))
+          .animate(delay: (i * 50).ms)
+          .scale(begin: const Offset(0.8, 0.8), curve: Curves.easeOutBack, duration: 400.ms)
+          .fadeIn(duration: 300.ms);
+        }
       ),
-      itemCount: animes.length,
-      itemBuilder: (ctx, i) {
-        return AnimeCard(anime: animes[i], onTap: () => onTap(animes[i]));
-      },
     );
   }
 }
@@ -662,106 +874,83 @@ class AnimeCard extends StatefulWidget {
   @override
   State<AnimeCard> createState() => _AnimeCardState();
 }
-
 class _AnimeCardState extends State<AnimeCard> {
   bool isHovered = false;
   @override
   Widget build(BuildContext context) {
-    return MouseRegion(
-      onEnter: (_) => setState(() => isHovered = true),
-      onExit: (_) => setState(() => isHovered = false),
-      cursor: SystemMouseCursors.click,
-      child: GestureDetector(
-        onTap: widget.onTap,
-        child: AnimatedContainer(
-          duration: 200.ms,
-          transform: Matrix4.identity()..scale(isHovered ? 1.05 : 1.0),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(20),
-            boxShadow: isHovered
-            ? [BoxShadow(color: kColorCoral.withOpacity(0.4), blurRadius: 20, offset: const Offset(0, 8))]
-            : [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))],
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(20),
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                Hero(
-                  tag: widget.anime.id,
-                  child: CachedNetworkImage(
-                    imageUrl: widget.anime.fullImageUrl,
-                    fit: BoxFit.cover,
-                    errorWidget: (_, __, ___) => Container(color: kColorPeach),
-                  ),
-                ),
-                Container(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [Colors.transparent, kColorDarkText.withOpacity(0.8)],
-                      begin: Alignment.center,
-                      end: Alignment.bottomCenter,
-                    ),
-                  ),
-                ),
-                Positioned(
-                  bottom: 12,
-                  left: 12,
-                  right: 12,
-                  child: Text(
-                    widget.anime.name,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
+    return MouseRegion(onEnter: (_) => setState(() => isHovered = true), onExit: (_) => setState(() => isHovered = false), cursor: SystemMouseCursors.click, child: GestureDetector(onTap: widget.onTap, child: AnimatedContainer(duration: 200.ms, transform: Matrix4.identity()..scale(isHovered ? 1.05 : 1.0), decoration: BoxDecoration(borderRadius: BorderRadius.circular(20), boxShadow: isHovered ? [BoxShadow(color: kColorCoral.withOpacity(0.4), blurRadius: 20, offset: const Offset(0, 8))] : [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))]), child: ClipRRect(borderRadius: BorderRadius.circular(20), child: Stack(fit: StackFit.expand, children: [CachedNetworkImage(imageUrl: widget.anime.fullImageUrl, fit: BoxFit.cover, errorWidget: (_, __, ___) => Container(color: kColorPeach)), Container(decoration: BoxDecoration(gradient: LinearGradient(colors: [Colors.transparent, kColorDarkText.withOpacity(0.8)], begin: Alignment.center, end: Alignment.bottomCenter))), Positioned(bottom: 12, left: 12, right: 12, child: Text(widget.anime.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white)))])))));
   }
 }
 
 class EpisodeChip extends StatefulWidget {
   final String epNum;
+  final bool isDownloadMode;
   final VoidCallback onTap;
-  const EpisodeChip({super.key, required this.epNum, required this.onTap});
+  const EpisodeChip({super.key, required this.epNum, required this.isDownloadMode, required this.onTap});
   @override
   State<EpisodeChip> createState() => _EpisodeChipState();
 }
-
 class _EpisodeChipState extends State<EpisodeChip> {
   bool isHovered = false;
   @override
   Widget build(BuildContext context) {
-    return MouseRegion(
-      onEnter: (_) => setState(() => isHovered = true),
-      onExit: (_) => setState(() => isHovered = false),
-      cursor: SystemMouseCursors.click,
-      child: GestureDetector(
-        onTap: widget.onTap,
-        child: AnimatedContainer(
-          duration: 150.ms,
-          decoration: BoxDecoration(
-            color: isHovered ? kColorCoral : Colors.white,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: isHovered ? kColorCoral : kColorSoftPink),
-            boxShadow: isHovered
-            ? [BoxShadow(color: kColorCoral.withOpacity(0.3), blurRadius: 8, offset: const Offset(0, 4))]
-            : [],
-          ),
-          child: Center(
-            child: Text(
-              widget.epNum,
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                color: isHovered ? Colors.white : kColorCoral,
+    return MouseRegion(onEnter: (_) => setState(() => isHovered = true), onExit: (_) => setState(() => isHovered = false), cursor: SystemMouseCursors.click, child: GestureDetector(onTap: widget.onTap, child: AnimatedContainer(duration: 150.ms, decoration: BoxDecoration(color: isHovered ? kColorCoral : Colors.white.withOpacity(0.8), borderRadius: BorderRadius.circular(12), border: Border.all(color: isHovered ? kColorCoral : (widget.isDownloadMode ? kColorCoral : kColorSoftPink), width: widget.isDownloadMode ? 2 : 1), boxShadow: isHovered ? [BoxShadow(color: kColorCoral.withOpacity(0.3), blurRadius: 8, offset: const Offset(0, 4))] : []), child: Stack(alignment: Alignment.center, children: [Text(widget.epNum, style: TextStyle(fontWeight: FontWeight.bold, color: isHovered ? Colors.white : kColorCoral)), if (widget.isDownloadMode && isHovered) const Positioned(right: 8, child: Icon(LucideIcons.download, size: 12, color: Colors.white))]))));
+  }
+}
+
+class HistoryCard extends StatefulWidget {
+  final HistoryItem item;
+  final VoidCallback onTap;
+  const HistoryCard({super.key, required this.item, required this.onTap});
+  @override
+  State<HistoryCard> createState() => _HistoryCardState();
+}
+class _HistoryCardState extends State<HistoryCard> {
+  bool isHovered = false;
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(onEnter: (_) => setState(() => isHovered = true), onExit: (_) => setState(() => isHovered = false), cursor: SystemMouseCursors.click, child: GestureDetector(onTap: widget.onTap, child: AnimatedContainer(duration: const Duration(milliseconds: 200), curve: Curves.easeOut, margin: const EdgeInsets.only(bottom: 15), height: 90, transform: Matrix4.identity()..scale(isHovered ? 1.02 : 1.0), child: LiquidGlassContainer(opacity: isHovered ? 0.9 : 0.6, child: Row(children: [CachedNetworkImage(imageUrl: widget.item.anime.fullImageUrl, width: 90, height: 90, fit: BoxFit.cover), const SizedBox(width: 20), Expanded(child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [Text(widget.item.anime.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 16)), Text("Episode ${widget.item.episode}", style: GoogleFonts.inter(color: kColorCoral, fontWeight: FontWeight.w600, fontSize: 14))])), Padding(padding: const EdgeInsets.only(right: 20), child: Icon(LucideIcons.playCircle, color: kColorCoral, size: 30))])))));
+  }
+}
+
+class FeaturedCarousel extends StatelessWidget {
+  final List<AnimeModel> animes;
+  final Function(AnimeModel) onTap;
+  const FeaturedCarousel({super.key, required this.animes, required this.onTap});
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 220,
+      child: ListView.builder(
+        padding: const EdgeInsets.symmetric(horizontal: 40),
+        scrollDirection: Axis.horizontal,
+        itemCount: animes.length,
+        itemBuilder: (context, index) {
+          final anime = animes[index];
+          return GestureDetector(
+            onTap: () => onTap(anime),
+            child: Container(
+              width: 300,
+              margin: const EdgeInsets.only(right: 20),
+              decoration: BoxDecoration(borderRadius: BorderRadius.circular(20), boxShadow: [BoxShadow(color: kColorCoral.withOpacity(0.2), blurRadius: 15, offset: const Offset(0, 8))]),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(20),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    CachedNetworkImage(imageUrl: anime.fullImageUrl, fit: BoxFit.cover, alignment: Alignment.topCenter),
+                    Container(decoration: BoxDecoration(gradient: LinearGradient(colors: [Colors.transparent, kColorDarkText.withOpacity(0.9)], begin: Alignment.topCenter, end: Alignment.bottomCenter))),
+                    Positioned(bottom: 20, left: 20, child: SizedBox(width: 260, child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                      Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), decoration: BoxDecoration(color: kColorCoral, borderRadius: BorderRadius.circular(8)), child: const Text("HOT", style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold))),
+                      const SizedBox(height: 5),
+                      Text(anime.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: GoogleFonts.inter(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                    ]))),
+                  ],
+                ),
               ),
             ),
-          ),
-        ),
+          ).animate().slideX(begin: 0.2, end: 0, delay: (index * 100).ms, curve: Curves.easeOut);
+        },
       ),
     );
   }
@@ -773,36 +962,29 @@ class GlassDock extends StatelessWidget {
   const GlassDock({super.key, required this.selectedIndex, required this.onItemSelected});
   @override
   Widget build(BuildContext context) {
-    final items = [
-      (LucideIcons.search, "Browse"),
-      (LucideIcons.history, "History"),
-      (LucideIcons.heart, "Favorites"),
-      (LucideIcons.info, "About"),
-    ];
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.6),
-        borderRadius: BorderRadius.circular(30),
-        border: Border.all(color: Colors.white),
-        boxShadow: [
-          BoxShadow(color: kColorCoral.withOpacity(0.15), blurRadius: 20, offset: const Offset(0, 10))
-        ],
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: List.generate(items.length, (index) {
-          final isSelected = selectedIndex == index;
-          return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            child: IconButton(
-              icon: Icon(items[index].$1, color: isSelected ? kColorCoral : Colors.black38),
-              onPressed: () => onItemSelected(index),
-              tooltip: items[index].$2,
-            ),
-          );
-        }),
-      ),
-    ).animate().slideY(begin: 1, end: 0, curve: Curves.easeOutQuart);
+    // Make dock smaller on mobile
+    final isMobile = MediaQuery.of(context).size.width < 900;
+
+    final items = [(LucideIcons.search, "Browse"), (LucideIcons.history, "History"), (LucideIcons.heart, "Favorites"), (LucideIcons.info, "About")];
+    return LiquidGlassContainer(
+      borderRadius: BorderRadius.circular(30),
+      child: Padding(
+        padding: EdgeInsets.symmetric(horizontal: isMobile ? 10 : 20, vertical: 12),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: List.generate(items.length, (index) {
+            final isSelected = selectedIndex == index;
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: IconButton(
+                icon: Icon(items[index].$1, color: isSelected ? kColorCoral : Colors.black38, size: isMobile ? 20 : 24),
+                onPressed: () => onItemSelected(index),
+                tooltip: items[index].$2
+              )
+            );
+          })
+        )
+      )
+    );
   }
 }
