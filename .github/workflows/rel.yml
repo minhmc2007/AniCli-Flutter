@@ -1,0 +1,231 @@
+name: Manual Build and Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release Version (e.g. v1.0.1)'
+        required: true
+        default: 'v1.0.1'
+
+permissions:
+  contents: write
+
+jobs:
+  # --- WINDOWS BUILD ---
+  build-windows:
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        channel: 'stable'
+    - name: Enable Windows Desktop
+      run: flutter config --enable-windows-desktop
+    - name: Get Dependencies
+      run: flutter pub get
+    - name: Build Windows
+      run: flutter build windows --release
+    - name: Compress Release
+      run: Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath animeclient-windows.zip
+    - name: Upload Windows Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: Windows-Build
+        path: animeclient-windows.zip
+
+  # --- LINUX BUILD ---
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev libasound2-dev libmpv-dev mpv
+      - name: Get Dependencies
+        run: flutter pub get
+      - name: Build Linux
+        run: flutter build linux --release
+      - name: Compress Linux Build
+        run: tar -czf animeclient-linux.tar.gz -C build/linux/x64/release/bundle .
+      - name: Upload Linux Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Linux-Build
+          path: animeclient-linux.tar.gz
+
+  # --- ANDROID BUILD ---
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+      - name: Get Dependencies
+        run: flutter pub get
+      - name: Build APK
+        run: flutter build apk --release
+      - name: Upload Android Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Android-APK
+          path: build/app/outputs/flutter-apk/app-release.apk
+
+  # --- MACOS BUILD ---
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+      - name: Enable MacOS Desktop
+        run: flutter config --enable-macos-desktop
+      - name: Get Dependencies
+        run: flutter pub get
+      - name: Build MacOS
+        run: flutter build macos --release
+      - name: Compress MacOS Build
+        run: |
+          cd build/macos/Build/Products/Release
+          zip -r ../../../../../animeclient-macos.zip "AniCli Flutter.app"
+      - name: Upload MacOS Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MacOS-Build
+          path: animeclient-macos.zip
+
+  # --- IOS BUILD (Unsigned) ---
+  build-ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+      - name: Get Dependencies
+        run: flutter pub get
+      - name: Build iOS (No Codesign)
+        run: flutter build ios --release --no-codesign
+      - name: Pack IPA
+        run: |
+          mkdir Payload
+          mv build/ios/iphoneos/Runner.app Payload/
+          zip -r animeclient-unsigned.ipa Payload
+      - name: Upload iOS Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: iOS-IPA-Unsigned
+          path: animeclient-unsigned.ipa
+
+  # --- CREATE RELEASE JOB ---
+  # --- CREATE RELEASE JOB ---
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: [build-windows, build-linux, build-android, build-macos, build-ios]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 
+
+      # Download all artifacts
+      - name: Download Windows Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: Windows-Build
+      - name: Download Linux Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: Linux-Build
+      - name: Download Android Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: Android-APK
+      - name: Download MacOS Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: MacOS-Build
+      - name: Download iOS Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: iOS-IPA-Unsigned
+
+      - name: Generate Changelog and Body
+        id: build_changelog
+        run: |
+          NEW_TAG="${{ inputs.version }}"
+          echo "Target Version: $NEW_TAG"
+          
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          echo "Previous Version found in git: $PREVIOUS_TAG"
+          
+          if [ -z "$PREVIOUS_TAG" ]; then
+            CHANGELOG=$(git log --pretty=format:"- %s")
+          else
+            CHANGELOG=$(git log --pretty=format:"- %s" $PREVIOUS_TAG..HEAD)
+          fi
+
+          cat <<EOF > release_body.md
+          🌸 $NEW_TAG: The "Cozy" Update
+          We are thrilled to announce the release of **Ani-Cli Flutter** $NEW_TAG! 🚀
+
+          This release marks the complete transition from the terminal-based Bash script to a fully native, high-performance Desktop application built with Flutter. We've kept the powerful scraping logic you love but wrapped it in a stunning, modern, and "Cozy" interface.
+
+          ### ✨ New Features
+          
+          **🎨 The "Cozy" UI Overhaul**
+          *   **Live Moving Background:** A soothing, animated gradient background that slowly drifts between Cream (#FEEAC9) and Peach (#FFCDC9).
+          *   **Glassmorphism:** A floating navigation dock and search bar with milky-glass effects and dynamic blurs.
+          *   **Smooth Animations:** Everything flows. From the staggered entry of anime cards to the Hero transitions when clicking an image.
+
+          **📺 Core Functionality**
+          *   **Native MPV Integration:** The app now has MPV officially built-in! No need to install it manually on your system.
+          *   **Smart Search:** Instant scraping of the AllAnime API to find Sub and Dub anime.
+          *   **Decryption Port:** Ported the complex link decryption logic entirely to Dart for faster execution.
+
+          **💾 Persistence (History & Favorites)**
+          *   **Watch History:** Automatically tracks the episodes you watch with timestamps.
+          *   **Favorites System:** "Heart" your best shows to keep them pinned in a dedicated tab.
+          *   **Local Storage:** All data is stored locally using SharedPreferences—no account or login required.
+
+          ### 🛠 Platforms Support
+          *   **Windows:** Portable .exe (Tested on Windows 11 24H2).
+          *   **Linux:** AppImage / Bundle (Tested on Arch Linux).
+          *   **Android:** APK (Tested on SDK 30).
+          *   **macOS / iOS:** Supported (Untested - Developer is poor 💸).
+
+          ### 📝 Changelog
+          $CHANGELOG
+
+          ### 🤝 Credits
+          Based on the scraping logic of ani-cli.
+          Ported and designed by minhmc2007.
+          EOF
+
+      - name: Publish Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ inputs.version }}
+          # FIX IS HERE: Quotes added around the name string
+          name: "${{ inputs.version }}: The Cozy Update"
+          body_path: release_body.md
+          prerelease: false
+          make_latest: true
+          files: |
+            animeclient-windows.zip
+            animeclient-linux.tar.gz
+            app-release.apk
+            animeclient-macos.zip
+            animeclient-unsigned.ipa
