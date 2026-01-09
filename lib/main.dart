@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui';
 import 'package:animeclient/api/ani_core.dart';
@@ -286,7 +287,7 @@ class _MainScreenState extends State<MainScreen> {
   }
 }
 
-// --- INTERNAL PLAYER SCREEN (Android, Windows, macOS) ---
+// --- INTERNAL PLAYER SCREEN (Android & iOS only) ---
 class InternalPlayerScreen extends StatefulWidget {
   final String streamUrl;
   final String title;
@@ -301,17 +302,16 @@ class InternalPlayerScreen extends StatefulWidget {
 class _InternalPlayerScreenState extends State<InternalPlayerScreen> {
   late final Player player;
   late final VideoController controller;
+  bool _showControls = true;
+  Timer? _hideTimer;
 
   @override
   void initState() {
     super.initState();
 
-    // Standard high-performance configuration for Android/Windows/iOS
     player = Player(
       configuration: const PlayerConfiguration(
         vo: 'gpu',
-        // 'auto' uses best available hardware decoding (MediaCodec on Android, D3D11 on Windows)
-        // This is much smoother than the software decoding we tried on Linux.
       ),
     );
 
@@ -330,10 +330,31 @@ class _InternalPlayerScreenState extends State<InternalPlayerScreen> {
 
     player.play();
     player.setVolume(100);
+    _startHideTimer();
+  }
+
+  void _startHideTimer() {
+    _hideTimer?.cancel();
+    _hideTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted) {
+        setState(() => _showControls = false);
+      }
+    });
+  }
+
+  void _toggleControls() {
+    if (!_showControls) {
+      setState(() => _showControls = true);
+      _startHideTimer();
+    } else {
+      setState(() => _showControls = false);
+      _hideTimer?.cancel();
+    }
   }
 
   @override
   void dispose() {
+    _hideTimer?.cancel();
     player.dispose();
     super.dispose();
   }
@@ -343,38 +364,298 @@ class _InternalPlayerScreenState extends State<InternalPlayerScreen> {
     return Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
-        child: Center(
-          child: MaterialVideoControlsTheme(
-            normal: MaterialVideoControlsThemeData(
-              seekBarThumbColor: kColorCoral,
-              seekBarPositionColor: kColorCoral,
-              buttonBarButtonColor: Colors.white,
-              // Custom top bar with title and close button
-              topButtonBar: [
-                const SizedBox(width: 20),
-                Expanded(
-                  child: Text(widget.title,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold))),
-                                IconButton(
-                                  onPressed: () => Navigator.pop(context),
-                                  icon: const Icon(Icons.close, color: Colors.white))
-              ]),
-              fullscreen: const MaterialVideoControlsThemeData(
-                seekBarThumbColor: kColorCoral,
-                seekBarPositionColor: kColorCoral,
-                buttonBarButtonColor: Colors.white,
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(12),
+        child: Stack(
+          children: [
+            Center(
+              child: GestureDetector(
+                onTap: _toggleControls,
                 child: Video(
                   controller: controller,
-                  controls: MaterialVideoControls,
+                  controls: (videoState) => CustomMobileControls(
+                    controller: controller,
+                    title: widget.title,
+                    showControls: _showControls,
+                    onClose: () => Navigator.pop(context),
+                  ),
                 ),
               ),
-          ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// Custom mobile controls with higher timeline
+class CustomMobileControls extends StatelessWidget {
+  final VideoController controller;
+  final String title;
+  final bool showControls;
+  final VoidCallback onClose;
+
+  const CustomMobileControls({
+    super.key,
+    required this.controller,
+    required this.title,
+    required this.showControls,
+    required this.onClose,
+  });
+
+  String _formatDuration(Duration duration) {
+    final hours = duration.inHours;
+    final minutes = duration.inMinutes.remainder(60);
+    final seconds = duration.inSeconds.remainder(60);
+
+    if (hours > 0) {
+      return '${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+    } else {
+      return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedOpacity(
+      opacity: showControls ? 1.0 : 0.0,
+      duration: const Duration(milliseconds: 200),
+      child: Container(
+        color: Colors.black54,
+        child: Column(
+          children: [
+            // Top Bar
+            Container(
+              height: 56,
+              color: Colors.black54,
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.arrow_back, color: Colors.white),
+                    onPressed: onClose,
+                  ),
+                  Expanded(
+                    child: Text(
+                      title,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                  ),
+                  StreamBuilder<bool>(
+                    stream: controller.player.stream.playing,
+                    builder: (context, snapshot) {
+                      final isPlaying = snapshot.data ?? false;
+                      return IconButton(
+                        icon: Icon(
+                          isPlaying ? Icons.pause : Icons.play_arrow,
+                          color: Colors.white,
+                        ),
+                        onPressed: () {
+                          if (isPlaying) {
+                            controller.player.pause();
+                          } else {
+                            controller.player.play();
+                          }
+                        },
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+
+            // Middle Spacer - Pushes timeline higher
+            const Expanded(child: SizedBox()),
+
+            // Bottom Controls with Timeline
+            Container(
+              padding: const EdgeInsets.only(bottom: 20, left: 16, right: 16),
+              child: Column(
+                children: [
+                  // Timeline/Seek Bar
+                  Container(
+                    height: 40, // Increased height for better touch target
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Row(
+                      children: [
+                        // Current time
+                        StreamBuilder<Duration>(
+                          stream: controller.player.stream.position,
+                          builder: (context, snapshot) {
+                            final position = snapshot.data ?? Duration.zero;
+                            return Text(
+                              _formatDuration(position),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                              ),
+                            );
+                          },
+                        ),
+
+                        // Seek bar
+                        Expanded(
+                          child: StreamBuilder<Duration>(
+                            stream: controller.player.stream.position,
+                            builder: (context, positionSnapshot) {
+                              return StreamBuilder<Duration>(
+                                stream: controller.player.stream.duration,
+                                builder: (context, durationSnapshot) {
+                                  final position = positionSnapshot.data ?? Duration.zero;
+                                  final duration = durationSnapshot.data ?? Duration.zero;
+                                  final durationMs = duration.inMilliseconds;
+                                  final positionMs = position.inMilliseconds;
+                                  final progress = durationMs > 0 ? positionMs / durationMs : 0.0;
+
+                                  return GestureDetector(
+                                    onTapDown: (details) {
+                                      final box = context.findRenderObject() as RenderBox;
+                                      final x = details.localPosition.dx;
+                                      final width = box.size.width;
+                                      final percentage = x / width;
+                                      controller.player.seek(Duration(milliseconds: (durationMs * percentage).round()));
+                                    },
+                                    child: Container(
+                                      height: 30, // Taller seek bar for mobile
+                                      padding: const EdgeInsets.symmetric(vertical: 12),
+                                      child: Stack(
+                                        children: [
+                                          // Background track
+                                          Container(
+                                            height: 4,
+                                            decoration: BoxDecoration(
+                                              color: Colors.white.withOpacity(0.3),
+                                              borderRadius: BorderRadius.circular(2),
+                                            ),
+                                          ),
+
+                                          // Progress
+                                          FractionallySizedBox(
+                                            widthFactor: progress,
+                                            child: Container(
+                                              height: 4,
+                                              decoration: BoxDecoration(
+                                                color: kColorCoral,
+                                                borderRadius: BorderRadius.circular(2),
+                                              ),
+                                            ),
+                                          ),
+
+                                          // Thumb
+                                          FractionallySizedBox(
+                                            widthFactor: progress,
+                                            child: Align(
+                                              alignment: Alignment.centerRight,
+                                              child: Container(
+                                                width: 16,
+                                                height: 16,
+                                                decoration: BoxDecoration(
+                                                  color: kColorCoral,
+                                                  shape: BoxShape.circle,
+                                                  boxShadow: [
+                                                    BoxShadow(
+                                                      color: kColorCoral.withOpacity(0.5),
+                                                      blurRadius: 4,
+                                                      spreadRadius: 2,
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  );
+                                },
+                              );
+                            },
+                          ),
+                        ),
+
+                        // Total duration
+                        StreamBuilder<Duration>(
+                          stream: controller.player.stream.duration,
+                          builder: (context, snapshot) {
+                            final duration = snapshot.data ?? Duration.zero;
+                            return Text(
+                              _formatDuration(duration),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                              ),
+                            );
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Control Buttons
+                  Container(
+                    height: 50,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        // Skip backward 10s
+                        IconButton(
+                          icon: const Icon(Icons.replay_10, color: Colors.white, size: 28),
+                          onPressed: () {
+                            controller.player.stream.position.first.then((position) {
+                              controller.player.seek(position - const Duration(seconds: 10));
+                            });
+                          },
+                        ),
+
+                        // Play/Pause
+                        StreamBuilder<bool>(
+                          stream: controller.player.stream.playing,
+                          builder: (context, snapshot) {
+                            final isPlaying = snapshot.data ?? false;
+                            return Container(
+                              width: 60,
+                              height: 60,
+                              decoration: BoxDecoration(
+                                color: kColorCoral.withOpacity(0.8),
+                                shape: BoxShape.circle,
+                              ),
+                              child: IconButton(
+                                icon: Icon(
+                                  isPlaying ? Icons.pause : Icons.play_arrow,
+                                  color: Colors.white,
+                                  size: 30,
+                                ),
+                                onPressed: () {
+                                  if (isPlaying) {
+                                    controller.player.pause();
+                                  } else {
+                                    controller.player.play();
+                                  }
+                                },
+                              ),
+                            );
+                          },
+                        ),
+
+                        // Skip forward 10s
+                        IconButton(
+                          icon: const Icon(Icons.forward_10, color: Colors.white, size: 28),
+                          onPressed: () {
+                            controller.player.stream.position.first.then((position) {
+                              controller.player.seek(position + const Duration(seconds: 10));
+                            });
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -495,7 +776,9 @@ with AutomaticKeepAliveClientMixin {
                     child: ScaleTransition(
                       scale:
                       Tween<double>(begin: 0.98, end: 1.0).animate(animation),
-                      child: child));
+                      child: child,
+                    ),
+                  );
                 },
                 child: _isLoading
                 ? const Center(
@@ -540,9 +823,9 @@ with AutomaticKeepAliveClientMixin {
                                 style: GoogleFonts.inter(
                                   fontSize: 24,
                                   fontWeight: FontWeight.bold,
-                                  color: kColorDarkText))
-                              .animate()
-                              .fadeIn(delay: 200.ms),
+                                  color: kColorDarkText,
+                                ),
+                              ).animate().fadeIn(delay: 200.ms),
                           ),
                           AnimeGrid(
                             animes: _animes, onTap: widget.onAnimeTap),
@@ -610,7 +893,8 @@ with AutomaticKeepAliveClientMixin {
               Text("Nothing here yet...",
                    style: GoogleFonts.inter(
                      color: Colors.black45, fontSize: 16)),
-            ]))
+            ]),
+          )
           : ListView.builder(
             padding: EdgeInsets.symmetric(
               horizontal: isMobile ? 20 : 40, vertical: 10),
@@ -620,14 +904,14 @@ with AutomaticKeepAliveClientMixin {
                 final item = history[i];
                 return HistoryCard(
                   item: item,
-                  onTap: () => widget.onAnimeTap(item.anime))
-                .animate(delay: (i * 100).ms)
+                  onTap: () => widget.onAnimeTap(item.anime),
+                ).animate(delay: (i * 100).ms)
                 .slideX(
                   begin: 0.2,
                   end: 0,
                   curve: Curves.easeOutCubic,
-                  duration: 500.ms)
-                .fadeIn(duration: 400.ms);
+                  duration: 500.ms,
+                ).fadeIn(duration: 400.ms);
               },
           ),
         ),
@@ -667,7 +951,8 @@ with AutomaticKeepAliveClientMixin {
           child: favorites.isEmpty
           ? Center(
             child: Text("No favorites yet!",
-                        style: GoogleFonts.inter(color: Colors.black26)))
+                        style: GoogleFonts.inter(color: Colors.black26)),
+          )
           : AnimeGrid(animes: favorites, onTap: widget.onAnimeTap),
         ),
       ],
@@ -688,7 +973,8 @@ class AboutView extends StatelessWidget {
             child: const Padding(
               padding: EdgeInsets.all(20),
               child: Icon(LucideIcons.clapperboard,
-                          size: 60, color: kColorCoral)),
+                          size: 60, color: kColorCoral),
+            ),
           ).animate().scale(curve: Curves.easeOutBack, duration: 600.ms),
           const SizedBox(height: 30),
           Text("AniCli Flutter",
@@ -700,7 +986,7 @@ class AboutView extends StatelessWidget {
           .fadeIn(delay: 200.ms)
           .slideY(begin: 0.5, end: 0),
           const SizedBox(height: 5),
-          Text("v1.5 Stable",
+          Text("v1.5 Hotfix",
                style: GoogleFonts.inter(
                  fontSize: 14,
                  color: kColorCoral,
@@ -764,7 +1050,7 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
       final url = await AniCore.getStreamUrl(widget.anime.id, epNum);
       setState(() => _loadingStatus = null);
       if (url != null) {
-        String safeName = "${widget.anime.name} - EP$epNum"
+        String safeName = "${widget.anime.name}-EP$epNum"
         .replaceAll(RegExp(r'[<>:"/\\|?*]'), '');
         AniCore.downloadEpisode(url, safeName);
         if (mounted) {
@@ -786,8 +1072,8 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
       setState(() => _loadingStatus = null);
 
       if (url != null) {
-        // === LINUX FIX: LAUNCH SYSTEM MPV ===
-        if (Platform.isLinux) {
+        // === DESKTOP OS: LAUNCH EXTERNAL SYSTEM MPV ===
+        if (Platform.isLinux || Platform.isWindows || Platform.isMacOS) {
           try {
             await Process.start(
               'mpv',
@@ -805,8 +1091,8 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
             }
           }
         }
-        // === ALL OTHER PLATFORMS: USE INTERNAL PLAYER ===
-        else {
+        // === MOBILE OS: USE INTERNAL PLAYER ===
+        else if (Platform.isAndroid || Platform.isIOS) {
           Navigator.of(context).push(
             MaterialPageRoute(
               builder: (context) => InternalPlayerScreen(
@@ -832,24 +1118,29 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
             gradient: LinearGradient(colors: [
               kColorCream.withOpacity(0.95),
               kColorPeach.withOpacity(0.95)
-            ], begin: Alignment.topLeft, end: Alignment.bottomRight))),
-            widget.isMobile ? _buildMobileLayout() : _buildDesktopLayout(),
-            if (_loadingStatus != null)
-              Positioned.fill(
-                child: LiquidGlassContainer(
-                  blur: 20,
-                  opacity: 0.8,
-                  borderRadius: BorderRadius.zero,
-                  child: Center(
-                    child: Column(mainAxisSize: MainAxisSize.min, children: [
-                      const CircularProgressIndicator(color: kColorCoral),
-                      const SizedBox(height: 20),
-                      Text(_loadingStatus!,
-                           style: const TextStyle(
-                             fontSize: 18,
-                             color: kColorCoral,
-                             fontWeight: FontWeight.bold))
-                    ])))),
+            ], begin: Alignment.topLeft, end: Alignment.bottomRight),
+          ),
+        ),
+        widget.isMobile ? _buildMobileLayout() : _buildDesktopLayout(),
+        if (_loadingStatus != null)
+          Positioned.fill(
+            child: LiquidGlassContainer(
+              blur: 20,
+              opacity: 0.8,
+              borderRadius: BorderRadius.zero,
+              child: Center(
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  const CircularProgressIndicator(color: kColorCoral),
+                  const SizedBox(height: 20),
+                  Text(_loadingStatus!,
+                       style: const TextStyle(
+                         fontSize: 18,
+                         color: kColorCoral,
+                         fontWeight: FontWeight.bold))
+                ]),
+              ),
+            ),
+          ),
       ],
     );
   }
@@ -876,7 +1167,8 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
                   .read<UserProvider>()
                   .toggleFavorite(widget.anime),
                   color: isFav ? kColorCoral : Colors.black26,
-                  fill: isFav),
+                  fill: isFav,
+                ),
               ]),
               const SizedBox(height: 30),
               Hero(
@@ -894,48 +1186,55 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
                       borderRadius: BorderRadius.circular(25),
                       child: CachedNetworkImage(
                         imageUrl: widget.anime.fullImageUrl,
-                        fit: BoxFit.cover))))
-              .animate()
-              .slideX(
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+                ),
+              ).animate().slideX(
                 begin: -0.2,
                 end: 0,
                 duration: 400.ms,
-                curve: Curves.easeOut),
-                const SizedBox(height: 25),
-                Text(widget.anime.name,
-                     textAlign: TextAlign.center,
-                     style: GoogleFonts.inter(
-                       fontSize: 24,
-                       fontWeight: FontWeight.bold,
-                       color: kColorDarkText))
-                .animate()
-                .fadeIn(delay: 200.ms),
-          ])),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.only(top: 80, right: 40, bottom: 40),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text("Episodes",
-                           style: GoogleFonts.inter(
-                             fontSize: 32,
-                             fontWeight: FontWeight.bold,
-                             color: kColorCoral))
-                      .animate()
-                      .fadeIn()
-                      .slideY(begin: -0.5, end: 0),
-                      MorphingDownloadButton(
-                        isDownloading: _isDownloadMode,
-                        onToggle: () => setState(() =>
-                        _isDownloadMode = !_isDownloadMode)),
-                    ]),
-                    const SizedBox(height: 20),
-                    Expanded(child: _buildEpisodeGrid()),
-                ]))),
+                curve: Curves.easeOut,
+              ),
+              const SizedBox(height: 25),
+              Text(widget.anime.name,
+                   textAlign: TextAlign.center,
+                   style: GoogleFonts.inter(
+                     fontSize: 24,
+                     fontWeight: FontWeight.bold,
+                     color: kColorDarkText))
+              .animate()
+              .fadeIn(delay: 200.ms),
+          ]),
+        ),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.only(top: 80, right: 40, bottom: 40),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text("Episodes",
+                         style: GoogleFonts.inter(
+                           fontSize: 32,
+                           fontWeight: FontWeight.bold,
+                           color: kColorCoral))
+                    .animate()
+                    .fadeIn()
+                    .slideY(begin: -0.5, end: 0),
+                    MorphingDownloadButton(
+                      isDownloading: _isDownloadMode,
+                      onToggle: () => setState(() =>
+                      _isDownloadMode = !_isDownloadMode),
+                    ),
+                  ]),
+                  const SizedBox(height: 20),
+                  Expanded(child: _buildEpisodeGrid()),
+              ]),
+          ),
+        ),
       ],
     );
   }
@@ -987,7 +1286,8 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
                       .read<UserProvider>()
                       .toggleFavorite(widget.anime),
                       color: isFav ? kColorCoral : Colors.black26,
-                      fill: isFav),
+                      fill: isFav,
+                    ),
                   ],
                 ),
               ),
@@ -1027,7 +1327,8 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
                        MorphingDownloadButton(
                          isDownloading: _isDownloadMode,
                          onToggle: () => setState(
-                           () => _isDownloadMode = !_isDownloadMode)),
+                           () => _isDownloadMode = !_isDownloadMode),
+                       ),
               ],
             ),
           ),
@@ -1037,7 +1338,8 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
           sliver: _isLoading
           ? const SliverToBoxAdapter(
             child: Center(
-              child: CircularProgressIndicator(color: kColorCoral)))
+              child: CircularProgressIndicator(color: kColorCoral)),
+          )
           : SliverGrid(
             gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
               maxCrossAxisExtent: 90,
@@ -1050,8 +1352,8 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
                 return EpisodeChip(
                   epNum: _episodes[i],
                   isDownloadMode: _isDownloadMode,
-                  onTap: () => _handleEpisodeTap(_episodes[i]))
-                .animate()
+                  onTap: () => _handleEpisodeTap(_episodes[i]),
+                ).animate()
                 .scale(delay: (i * 10).ms, duration: 200.ms);
               },
               childCount: _episodes.length,
@@ -1077,10 +1379,11 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
           return EpisodeChip(
             epNum: _episodes[i],
             isDownloadMode: _isDownloadMode,
-            onTap: () => _handleEpisodeTap(_episodes[i]))
-          .animate()
+            onTap: () => _handleEpisodeTap(_episodes[i]),
+          ).animate()
           .scale(delay: (i * 20).ms, duration: 200.ms);
-        });
+        },
+    );
   }
 
   Widget _buildCircleBtn(IconData icon, VoidCallback onTap,
@@ -1091,7 +1394,10 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
         borderRadius: BorderRadius.circular(50),
         child: Container(
           padding: const EdgeInsets.all(12),
-          child: Icon(icon, color: color, fill: fill ? 1.0 : 0.0))));
+          child: Icon(icon, color: color, fill: fill ? 1.0 : 0.0),
+        ),
+      ),
+    );
                          }
 }
 
@@ -1131,37 +1437,40 @@ class MorphingDownloadButton extends StatelessWidget {
                     child: Transform.translate(
                       offset: Offset(-20 * t, 0),
                       child: Icon(LucideIcons.download,
-                                  color: Color.lerp(
-                                    kColorCoral, Colors.white, t)!))),
-                             Opacity(
-                               opacity: t.clamp(0.0, 1.0),
-                               child: Transform.translate(
-                                 offset: Offset(20 * (1.0 - t), 0),
-                                 child: SingleChildScrollView(
-                                   scrollDirection: Axis.horizontal,
-                                   physics: const NeverScrollableScrollPhysics(),
-                                   child: Container(
-                                     width: 240,
-                                     padding: const EdgeInsets.symmetric(
-                                       horizontal: 16),
-                                       child: Row(
-                                         mainAxisAlignment:
-                                         MainAxisAlignment.center,
-                                         children: const [
-                                           Icon(LucideIcons.downloadCloud,
-                                                color: Colors.white, size: 18),
-                                                SizedBox(width: 8),
-                                                Text("Select Ep to Download",
-                                                     style: TextStyle(
-                                                       color: Colors.white,
-                                                       fontWeight: FontWeight.bold,
-                                                       fontSize: 13)),
-                                                  SizedBox(width: 5),
-                                                  Icon(LucideIcons.x,
-                                                       color: Colors.white70, size: 16)
-                                         ]))))),
-                ]))));
-      });
+                                  color: Color.lerp(kColorCoral, Colors.white, t)!),
+                    ),
+                  ),
+                  Opacity(
+                    opacity: t.clamp(0.0, 1.0),
+                    child: Transform.translate(
+                      offset: Offset(20 * (1.0 - t), 0),
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        physics: const NeverScrollableScrollPhysics(),
+                        child: Container(
+                          width: 240,
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: const [
+                              Icon(LucideIcons.downloadCloud, color: Colors.white, size: 18),
+                              SizedBox(width: 8),
+                              Text("Select Ep to Download",
+                                   style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                                   SizedBox(width: 5),
+                                   Icon(LucideIcons.x, color: Colors.white70, size: 16),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ]),
+              ),
+          ),
+        );
+      },
+    );
   }
 }
 
@@ -1190,8 +1499,8 @@ class AnimeGrid extends StatelessWidget {
             .scale(
               begin: const Offset(0.8, 0.8),
               curve: Curves.easeOutBack,
-              duration: 400.ms)
-            .fadeIn(duration: 300.ms);
+              duration: 400.ms,
+            ).fadeIn(duration: 300.ms);
           }),
     );
   }
@@ -1260,8 +1569,13 @@ class _AnimeCardState extends State<AnimeCard> {
                                       style: const TextStyle(
                                         fontSize: 14,
                                         fontWeight: FontWeight.bold,
-                                        color: Colors.white)))
-              ])))));
+                                        color: Colors.white)),
+                        )
+              ]),
+            ),
+        ),
+      ),
+    );
   }
 }
 
@@ -1318,7 +1632,10 @@ class _EpisodeChipState extends State<EpisodeChip> {
                            right: 8,
                            child: Icon(LucideIcons.download,
                                        size: 12, color: Colors.white))
-              ]))));
+              ]),
+        ),
+      ),
+    );
   }
 }
 
@@ -1370,12 +1687,17 @@ class _HistoryCardState extends State<HistoryCard> {
                                     color: kColorCoral,
                                     fontWeight: FontWeight.w600,
                                     fontSize: 14))
-                    ])),
-                    Padding(
-                      padding: const EdgeInsets.only(right: 20),
-                      child: Icon(LucideIcons.playCircle,
-                                  color: kColorCoral, size: 30))
-            ])))));
+                    ]),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(right: 20),
+                  child: Icon(LucideIcons.playCircle,
+                              color: kColorCoral, size: 30))
+            ]),
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -1435,33 +1757,40 @@ class FeaturedCarousel extends StatelessWidget {
                                      mainAxisSize: MainAxisSize.min,
                                      children: [
                                        Container(
-                                         padding: const EdgeInsets.symmetric(
-                                           horizontal: 8, vertical: 4),
-                                           decoration: BoxDecoration(
-                                             color: kColorCoral,
-                                             borderRadius:
-                                             BorderRadius.circular(8)),
-                                             child: const Text("HOT",
-                                                               style: TextStyle(
-                                                                 color: Colors.white,
-                                                                 fontSize: 10,
-                                                                 fontWeight: FontWeight.bold))),
-                                                 const SizedBox(height: 5),
-                                                 Text(anime.name,
-                                                      maxLines: 1,
-                                                      overflow: TextOverflow.ellipsis,
-                                                      style: GoogleFonts.inter(
-                                                        color: Colors.white,
-                                                        fontSize: 18,
-                                                        fontWeight: FontWeight.bold)),
-                                     ]))),
+                                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                         decoration: BoxDecoration(
+                                           color: kColorCoral,
+                                           borderRadius: BorderRadius.circular(8),
+                                         ),
+                                         child: const Text(
+                                           "HOT",
+                                           style: TextStyle(
+                                             color: Colors.white,
+                                             fontSize: 10,
+                                             fontWeight: FontWeight.bold,
+                                           ),
+                                         ),
+                                       ),
+                                       const SizedBox(height: 5),
+                                       Text(
+                                         anime.name,
+                                         maxLines: 1,
+                                         overflow: TextOverflow.ellipsis,
+                                         style: GoogleFonts.inter(
+                                           color: Colors.white,
+                                           fontSize: 18,
+                                           fontWeight: FontWeight.bold,
+                                         ),
+                                       ),
+                                     ],
+                                   ),
+                                 ),
+                               ),
                     ],
                   ),
                 ),
             ),
-          )
-          .animate()
-          .slideX(
+          ).animate().slideX(
             begin: 0.2,
             end: 0,
             delay: (index * 100).ms,
@@ -1503,7 +1832,12 @@ class GlassDock extends StatelessWidget {
                              color: isSelected ? kColorCoral : Colors.black38,
                              size: isMobile ? 20 : 24),
                              onPressed: () => onItemSelected(index),
-                             tooltip: items[index].$2));
-            }))));
+                             tooltip: items[index].$2,
+                ),
+              );
+            }),
+          ),
+      ),
+    );
   }
 }
