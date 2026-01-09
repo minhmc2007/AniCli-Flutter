@@ -1,22 +1,23 @@
-
 # 🌸 Ani-Cli Flutter
 
 ![Flutter](https://img.shields.io/badge/Flutter-%2302569B.svg?style=for-the-badge&logo=Flutter&logoColor=white)
 ![Linux](https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)
 ![Windows](https://img.shields.io/badge/Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)
+![macOS](https://img.shields.io/badge/macOS-000000?style=for-the-badge&logo=apple&logoColor=white)
+![iOS](https://img.shields.io/badge/iOS-000000?style=for-the-badge&logo=ios&logoColor=white)
 ![License](https://img.shields.io/badge/License-GPLv3-blue.svg?style=for-the-badge)
 
 > **The Cozy Anime Client.**
 > A beautiful, animated Flutter port of the [ani-cli](https://github.com/pystardust/ani-cli) shell script.
 
-**Ani-Cli Flutter** combines the powerful scraping logic of the terminal-based `ani-cli` with a high-end, glassmorphic user interface. Designed with a "Cozy" aesthetic (Cream & Peach palette), it provides a seamless and ad-free anime watching experience on Desktop.
+**Ani-Cli Flutter** combines the powerful scraping logic of the terminal-based `ani-cli` with a high-end, glassmorphic user interface. Designed with a "Cozy" aesthetic (Cream & Peach palette), it provides a seamless and ad-free anime watching experience on Desktop and Mobile.
 
 ---
 
 ## ✨ Features
 
 *   **🎨 Cozy UI**: A relaxing, pastel-themed interface with live moving gradients and milky glassmorphism.
-*   **🚀 High Performance**: Built with Flutter for native performance on Linux and Windows.
+*   **🚀 High Performance**: Built with Flutter for native performance on Linux, Windows, macOS, and iOS.
 *   **🎞️ MPV Integration**: Uses the system `mpv` player for hardware-accelerated playback and high compatibility.
 *   **❤️ Favorites**: Save your favorite shows for quick access.
 *   **clock History**: Automatically tracks watched episodes and saves your progress locally.
@@ -27,11 +28,16 @@
 
 ## 🛠️ Prerequisites
 
-Before running the app, you **must** have `mpv` installed on your system. This app acts as a frontend controller for MPV.
+Before running the app on Desktop, you **must** have `mpv` installed on your system. This app acts as a frontend controller for MPV.
 
 ### Linux (Arch/Manjaro)
 ```bash
 sudo pacman -S mpv
+```
+
+### macOS (Homebrew)
+```bash
+brew install mpv
 ```
 
 ### Windows
@@ -65,6 +71,11 @@ flutter run -d linux
 flutter run -d windows
 ```
 
+**macOS:**
+```bash
+flutter run -d macos
+```
+
 ---
 
 ## 📦 Building for Release
@@ -87,6 +98,11 @@ cp -r build/linux/x64/release/bundle/* AppDir/usr/bin/
 flutter build windows --release
 ```
 The output file will be in `build\windows\x64\runner\Release\`.
+
+### macOS (DMG/App)
+```bash
+flutter build macos --release
+```
 
 ---
 
