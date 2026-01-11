@@ -19,39 +19,23 @@ dependencies:
 
   # UI & Animations
   flutter_animate: ^4.5.0
-  google_fonts: ^6.1.0
+  google_fonts: ^7.0.0
   cached_network_image: ^3.3.1
   lucide_icons: ^0.257.0
-  glass_kit: ^3.0.0
+  glass_kit: ^4.0.2
   url_launcher: ^6.2.0
   media_kit: ^1.1.10
-  media_kit_video: ^1.2.4
+  media_kit_video: ^2.0.1
   media_kit_libs_video: ^1.0.4 # Contains the MPV binaries
 
   # Permissions (for Android/iOS)
-  permission_handler: ^11.0.1
+  permission_handler: ^12.0.1
   path_provider: ^2.1.1
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^3.0.0
+  flutter_lints: ^6.0.0
 
 flutter:
   uses-material-design: true
-flutter_icons:
-  android: "ic_launcher"
-  ios: true
-  image_path: "assets/icon.png"
-  min_sdk_android: 21
-  # Windows generation (No need to manually convert to .ico anymore!)
-  windows:
-    generate: true
-    image_path: "assets/icon.png"
-    icon_size: 256
-  # MacOS generation
-  macos:
-    generate: true
-    image_path: "assets/icon.png"
 
-flutter_launcher_name:
-  name: "AniCli Flutter"
