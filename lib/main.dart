@@ -12,6 +12,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 // --- THEME COLORS ---
 const kColorCream = Color(0xFFFEEAC9);
@@ -28,10 +29,23 @@ void main() {
     MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => UserProvider()),
+        ChangeNotifierProvider(create: (_) => SettingsProvider()),
       ],
       child: const AniCliApp(),
     ),
   );
+}
+
+// --- SETTINGS PROVIDER ---
+class SettingsProvider extends ChangeNotifier {
+  bool _useInternalPlayer = false;
+
+  bool get useInternalPlayer => _useInternalPlayer;
+
+  void toggleInternalPlayer(bool value) {
+    _useInternalPlayer = value;
+    notifyListeners();
+  }
 }
 
 class AniCliApp extends StatelessWidget {
@@ -180,6 +194,7 @@ class _MainScreenState extends State<MainScreen> {
   final GlobalKey<_BrowseViewState> _browseKey = GlobalKey();
   final GlobalKey<_HistoryViewState> _historyKey = GlobalKey();
   final GlobalKey<_FavoritesViewState> _favKey = GlobalKey();
+  final GlobalKey<_SettingsViewState> _settingsKey = GlobalKey();
 
   AnimeModel? _detailAnime;
 
@@ -213,8 +228,8 @@ class _MainScreenState extends State<MainScreen> {
         break;
       case 3:
       default:
-        activePage = const AboutView(key: ValueKey("AboutTab"));
-        activeKey = const ValueKey("AboutTab");
+        activePage = SettingsView(key: _settingsKey);
+        activeKey = const ValueKey("SettingsTab");
         break;
     }
 
@@ -287,7 +302,7 @@ class _MainScreenState extends State<MainScreen> {
   }
 }
 
-// --- INTERNAL PLAYER SCREEN (Android & iOS only) ---
+// --- INTERNAL PLAYER SCREEN (Mobile & Debug Desktop) ---
 class InternalPlayerScreen extends StatefulWidget {
   final String streamUrl;
   final String title;
@@ -387,7 +402,6 @@ class _InternalPlayerScreenState extends State<InternalPlayerScreen> {
   }
 }
 
-// Custom mobile controls with higher timeline
 class CustomMobileControls extends StatelessWidget {
   final VideoController controller;
   final String title;
@@ -423,7 +437,6 @@ class CustomMobileControls extends StatelessWidget {
         color: Colors.black54,
         child: Column(
           children: [
-            // Top Bar
             Container(
               height: 56,
               color: Colors.black54,
@@ -466,22 +479,16 @@ class CustomMobileControls extends StatelessWidget {
                 ],
               ),
             ),
-
-            // Middle Spacer - Pushes timeline higher
             const Expanded(child: SizedBox()),
-
-            // Bottom Controls with Timeline
             Container(
               padding: const EdgeInsets.only(bottom: 20, left: 16, right: 16),
               child: Column(
                 children: [
-                  // Timeline/Seek Bar
                   Container(
-                    height: 40, // Increased height for better touch target
+                    height: 40,
                     padding: const EdgeInsets.symmetric(horizontal: 8),
                     child: Row(
                       children: [
-                        // Current time
                         StreamBuilder<Duration>(
                           stream: controller.player.stream.position,
                           builder: (context, snapshot) {
@@ -495,8 +502,6 @@ class CustomMobileControls extends StatelessWidget {
                             );
                           },
                         ),
-
-                        // Seek bar
                         Expanded(
                           child: StreamBuilder<Duration>(
                             stream: controller.player.stream.position,
@@ -504,70 +509,78 @@ class CustomMobileControls extends StatelessWidget {
                               return StreamBuilder<Duration>(
                                 stream: controller.player.stream.duration,
                                 builder: (context, durationSnapshot) {
-                                  final position = positionSnapshot.data ?? Duration.zero;
-                                  final duration = durationSnapshot.data ?? Duration.zero;
+                                  final position =
+                                  positionSnapshot.data ?? Duration.zero;
+                                  final duration =
+                                  durationSnapshot.data ?? Duration.zero;
                                   final durationMs = duration.inMilliseconds;
                                   final positionMs = position.inMilliseconds;
-                                  final progress = durationMs > 0 ? positionMs / durationMs : 0.0;
+                                  final progress = durationMs > 0
+                                  ? positionMs / durationMs
+                                  : 0.0;
 
                                   return GestureDetector(
                                     onTapDown: (details) {
-                                      final box = context.findRenderObject() as RenderBox;
+                                      final box = context.findRenderObject()
+                                      as RenderBox;
                                       final x = details.localPosition.dx;
                                       final width = box.size.width;
                                       final percentage = x / width;
-                                      controller.player.seek(Duration(milliseconds: (durationMs * percentage).round()));
+                                      controller.player.seek(Duration(
+                                        milliseconds:
+                                        (durationMs * percentage)
+                                        .round()));
                                     },
                                     child: Container(
-                                      height: 30, // Taller seek bar for mobile
-                                      padding: const EdgeInsets.symmetric(vertical: 12),
-                                      child: Stack(
-                                        children: [
-                                          // Background track
-                                          Container(
-                                            height: 4,
-                                            decoration: BoxDecoration(
-                                              color: Colors.white.withOpacity(0.3),
-                                              borderRadius: BorderRadius.circular(2),
-                                            ),
-                                          ),
-
-                                          // Progress
-                                          FractionallySizedBox(
-                                            widthFactor: progress,
-                                            child: Container(
+                                      height: 30,
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 12),
+                                        child: Stack(
+                                          children: [
+                                            Container(
                                               height: 4,
                                               decoration: BoxDecoration(
-                                                color: kColorCoral,
-                                                borderRadius: BorderRadius.circular(2),
+                                                color:
+                                                Colors.white.withOpacity(0.3),
+                                                borderRadius:
+                                                BorderRadius.circular(2),
                                               ),
                                             ),
-                                          ),
-
-                                          // Thumb
-                                          FractionallySizedBox(
-                                            widthFactor: progress,
-                                            child: Align(
-                                              alignment: Alignment.centerRight,
+                                            FractionallySizedBox(
+                                              widthFactor: progress,
                                               child: Container(
-                                                width: 16,
-                                                height: 16,
+                                                height: 4,
                                                 decoration: BoxDecoration(
                                                   color: kColorCoral,
-                                                  shape: BoxShape.circle,
-                                                  boxShadow: [
-                                                    BoxShadow(
-                                                      color: kColorCoral.withOpacity(0.5),
-                                                      blurRadius: 4,
-                                                      spreadRadius: 2,
-                                                    ),
-                                                  ],
+                                                  borderRadius:
+                                                  BorderRadius.circular(2),
                                                 ),
                                               ),
                                             ),
-                                          ),
-                                        ],
-                                      ),
+                                            FractionallySizedBox(
+                                              widthFactor: progress,
+                                              child: Align(
+                                                alignment: Alignment.centerRight,
+                                                child: Container(
+                                                  width: 16,
+                                                  height: 16,
+                                                  decoration: BoxDecoration(
+                                                    color: kColorCoral,
+                                                    shape: BoxShape.circle,
+                                                    boxShadow: [
+                                                      BoxShadow(
+                                                        color: kColorCoral
+                                                        .withOpacity(0.5),
+                                                        blurRadius: 4,
+                                                        spreadRadius: 2,
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
                                     ),
                                   );
                                 },
@@ -575,8 +588,6 @@ class CustomMobileControls extends StatelessWidget {
                             },
                           ),
                         ),
-
-                        // Total duration
                         StreamBuilder<Duration>(
                           stream: controller.player.stream.duration,
                           builder: (context, snapshot) {
@@ -593,24 +604,22 @@ class CustomMobileControls extends StatelessWidget {
                       ],
                     ),
                   ),
-
-                  // Control Buttons
                   Container(
                     height: 50,
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                       children: [
-                        // Skip backward 10s
                         IconButton(
-                          icon: const Icon(Icons.replay_10, color: Colors.white, size: 28),
-                          onPressed: () {
-                            controller.player.stream.position.first.then((position) {
-                              controller.player.seek(position - const Duration(seconds: 10));
-                            });
-                          },
+                          icon: const Icon(Icons.replay_10,
+                                           color: Colors.white, size: 28),
+                                   onPressed: () {
+                                     controller.player.stream.position.first
+                                     .then((position) {
+                                       controller.player.seek(
+                                         position - const Duration(seconds: 10));
+                                     });
+                                   },
                         ),
-
-                        // Play/Pause
                         StreamBuilder<bool>(
                           stream: controller.player.stream.playing,
                           builder: (context, snapshot) {
@@ -639,15 +648,16 @@ class CustomMobileControls extends StatelessWidget {
                             );
                           },
                         ),
-
-                        // Skip forward 10s
                         IconButton(
-                          icon: const Icon(Icons.forward_10, color: Colors.white, size: 28),
-                          onPressed: () {
-                            controller.player.stream.position.first.then((position) {
-                              controller.player.seek(position + const Duration(seconds: 10));
-                            });
-                          },
+                          icon: const Icon(Icons.forward_10,
+                                           color: Colors.white, size: 28),
+                                   onPressed: () {
+                                     controller.player.stream.position.first
+                                     .then((position) {
+                                       controller.player.seek(
+                                         position + const Duration(seconds: 10));
+                                     });
+                                   },
                         ),
                       ],
                     ),
@@ -789,7 +799,8 @@ with AutomaticKeepAliveClientMixin {
                   child: _animes.isEmpty
                   ? Center(
                     child: Text("No results found.",
-                                style: GoogleFonts.inter(color: Colors.black26)))
+                                style:
+                                GoogleFonts.inter(color: Colors.black26)))
                   : SingleChildScrollView(
                     physics: const BouncingScrollPhysics(),
                     child: Column(
@@ -905,13 +916,15 @@ with AutomaticKeepAliveClientMixin {
                 return HistoryCard(
                   item: item,
                   onTap: () => widget.onAnimeTap(item.anime),
-                ).animate(delay: (i * 100).ms)
+                )
+                .animate(delay: (i * 100).ms)
                 .slideX(
                   begin: 0.2,
                   end: 0,
                   curve: Curves.easeOutCubic,
                   duration: 500.ms,
-                ).fadeIn(duration: 400.ms);
+                )
+                .fadeIn(duration: 400.ms);
               },
           ),
         ),
@@ -953,48 +966,282 @@ with AutomaticKeepAliveClientMixin {
             child: Text("No favorites yet!",
                         style: GoogleFonts.inter(color: Colors.black26)),
           )
-          : AnimeGrid(animes: favorites, onTap: widget.onAnimeTap),
+          : AnimeGrid(
+            animes: favorites,
+            onTap: widget.onAnimeTap,
+            // Enable scrolling for Favorites
+            physics: const BouncingScrollPhysics(),
+            shrinkWrap: false,
+          ),
         ),
       ],
     );
   }
 }
 
-class AboutView extends StatelessWidget {
-  const AboutView({super.key});
+// --- SETTINGS VIEW ---
+class SettingsView extends StatefulWidget {
+  const SettingsView({super.key});
+
+  @override
+  State<SettingsView> createState() => _SettingsViewState();
+}
+
+class _SettingsViewState extends State<SettingsView> {
+  int _tapCount = 0;
+  final String _githubUrl = "https://github.com/minhmc2007/AniCli-Flutter";
+  final String _rickRollUrl = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
+
+  Future<void> _launchUrl(String url) async {
+    final uri = Uri.parse(url);
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Could not launch $url"),
+            backgroundColor: kColorCoral,
+          ),
+        );
+      }
+    }
+  }
+
+  void _handleEasterEgg() {
+    setState(() {
+      _tapCount++;
+    });
+
+    if (_tapCount >= 7) {
+      _tapCount = 0;
+      _launchUrl(_rickRollUrl);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("🎵 Never gonna give you up..."),
+          backgroundColor: kColorCoral,
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          LiquidGlassContainer(
-            borderRadius: BorderRadius.circular(50),
-            child: const Padding(
-              padding: EdgeInsets.all(20),
-              child: Icon(LucideIcons.clapperboard,
-                          size: 60, color: kColorCoral),
+    final isMobile = MediaQuery.of(context).size.width < 900;
+    final settingsProvider = context.watch<SettingsProvider>();
+
+    final List<Widget> settingsItems = [
+      _buildSectionTitle("General"),
+      if (Platform.isLinux || Platform.isWindows || Platform.isMacOS)
+        _buildSwitchTile(
+          icon: LucideIcons.playCircle,
+          title: "Use Internal Player",
+          subtitle: "Use built-in player instead of System MPV (Debug)",
+          value: settingsProvider.useInternalPlayer,
+          onChanged: (val) => settingsProvider.toggleInternalPlayer(val),
+        ),
+
+        const SizedBox(height: 15),
+
+        _buildSectionTitle("Development"),
+        _buildSettingCard(
+          icon: LucideIcons.user,
+          title: "Developer",
+          subtitle: "minhmc2007",
+          onTap: () {},
+        ),
+        const SizedBox(height: 10),
+        _buildSettingCard(
+          icon: LucideIcons.github,
+          title: "GitHub Repository",
+          subtitle: "minhmc2007/AniCli-Flutter",
+          trailing: const Icon(LucideIcons.externalLink,
+                               size: 16, color: kColorCoral),
+                          onTap: () => _launchUrl(_githubUrl),
+        ),
+
+        const SizedBox(height: 30),
+
+        _buildSectionTitle("About"),
+        LiquidGlassContainer(
+          opacity: 0.6,
+          child: Column(
+            children: [
+              _buildListTile(
+                icon: LucideIcons.info,
+                title: "Version",
+                subtitle: "v1.6",
+              ),
+              Divider(
+                height: 1,
+                color: Colors.white.withOpacity(0.5),
+                indent: 20,
+                endIndent: 20),
+                _buildListTile(
+                  icon: LucideIcons.hash,
+                  title: "Build Number",
+                  subtitle: "160",
+                  onTap: _handleEasterEgg,
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 100),
+    ];
+
+    return Column(
+      children: [
+        const SizedBox(height: 60),
+        Text("Settings",
+             style: GoogleFonts.inter(
+               fontSize: 32,
+               fontWeight: FontWeight.bold,
+               color: kColorCoral))
+        .animate()
+        .fadeIn()
+        .slideY(begin: -0.5, end: 0),
+        const SizedBox(height: 20),
+        Expanded(
+          child: ListView.builder(
+            physics: const BouncingScrollPhysics(),
+            padding: EdgeInsets.symmetric(
+              horizontal: isMobile ? 20 : 40, vertical: 10),
+              itemCount: settingsItems.length,
+              itemBuilder: (context, index) {
+                return settingsItems[index]
+                .animate(delay: (index * 100).ms)
+                .slideX(
+                  begin: 0.2,
+                  end: 0,
+                  curve: Curves.easeOutCubic,
+                  duration: 500.ms,
+                )
+                .fadeIn(duration: 400.ms);
+              },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSectionTitle(String title) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10, left: 10, top: 10),
+      child: Text(
+        title.toUpperCase(),
+        style: GoogleFonts.inter(
+          fontSize: 14,
+          fontWeight: FontWeight.bold,
+          color: kColorDarkText.withOpacity(0.6),
+          letterSpacing: 1.2,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSwitchTile({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required bool value,
+    required ValueChanged<bool> onChanged,
+  }) {
+    return LiquidGlassContainer(
+      opacity: 0.6,
+      child: SwitchListTile(
+        value: value,
+        onChanged: onChanged,
+        activeColor: kColorCoral,
+        secondary: Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: kColorCoral.withOpacity(0.1),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(icon, color: kColorCoral, size: 24),
+        ),
+        title: Text(title,
+                    style: GoogleFonts.inter(
+                      fontWeight: FontWeight.bold, fontSize: 16)),
+                      subtitle: Text(subtitle,
+                                     style: GoogleFonts.inter(
+                                       color: Colors.black54, fontSize: 13)),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      ),
+    );
+  }
+
+  Widget _buildSettingCard({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    Widget? trailing,
+    VoidCallback? onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: LiquidGlassContainer(
+        opacity: 0.6,
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: kColorCoral.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(icon, color: kColorCoral, size: 24),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title,
+                         style: GoogleFonts.inter(
+                           fontWeight: FontWeight.bold, fontSize: 16)),
+                           Text(subtitle,
+                                style: GoogleFonts.inter(
+                                  color: Colors.black54, fontSize: 13)),
+                  ],
+                ),
+              ),
+              if (trailing != null) trailing,
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildListTile({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    VoidCallback? onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Row(
+          children: [
+            Icon(icon, color: kColorDarkText.withOpacity(0.7), size: 20),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Text(title,
+                          style: GoogleFonts.inter(
+                            fontWeight: FontWeight.w600, fontSize: 15)),
             ),
-          ).animate().scale(curve: Curves.easeOutBack, duration: 600.ms),
-          const SizedBox(height: 30),
-          Text("AniCli Flutter",
-               style: GoogleFonts.inter(
-                 fontSize: 32,
-                 fontWeight: FontWeight.bold,
-                 color: kColorDarkText))
-          .animate()
-          .fadeIn(delay: 200.ms)
-          .slideY(begin: 0.5, end: 0),
-          const SizedBox(height: 5),
-          Text("v1.5 Hotfix",
-               style: GoogleFonts.inter(
-                 fontSize: 14,
-                 color: kColorCoral,
-                 fontWeight: FontWeight.w600))
-          .animate()
-          .fadeIn(delay: 400.ms)
-          .slideY(begin: 0.5, end: 0),
-        ],
+            Text(subtitle,
+                 style: GoogleFonts.inter(
+                   color: kColorCoral,
+                   fontWeight: FontWeight.bold,
+                   fontSize: 14)),
+          ],
+        ),
       ),
     );
   }
@@ -1065,15 +1312,14 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
         }
       }
     } else {
-      // --- STREAMING LOGIC ---
       setState(() => _loadingStatus = "Fetching Stream...");
       context.read<UserProvider>().addToHistory(widget.anime, epNum);
       final url = await AniCore.getStreamUrl(widget.anime.id, epNum);
       setState(() => _loadingStatus = null);
 
       if (url != null) {
-        // === DESKTOP OS: LAUNCH EXTERNAL SYSTEM MPV ===
-        if (Platform.isLinux || Platform.isWindows || Platform.isMacOS) {
+        final useInternal = context.read<SettingsProvider>().useInternalPlayer;
+        if (!useInternal && (Platform.isLinux || Platform.isWindows || Platform.isMacOS)) {
           try {
             await Process.start(
               'mpv',
@@ -1090,9 +1336,7 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
                 content: Text("Could not launch external MPV: $e")));
             }
           }
-        }
-        // === MOBILE OS: USE INTERNAL PLAYER ===
-        else if (Platform.isAndroid || Platform.isIOS) {
+        } else {
           Navigator.of(context).push(
             MaterialPageRoute(
               builder: (context) => InternalPlayerScreen(
@@ -1145,7 +1389,6 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
     );
   }
 
-  // --- DESKTOP LAYOUT ---
   Widget _buildDesktopLayout() {
     final isFav = context.watch<UserProvider>().isFavorite(widget.anime.id);
     return Row(
@@ -1226,8 +1469,8 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
                     .slideY(begin: -0.5, end: 0),
                     MorphingDownloadButton(
                       isDownloading: _isDownloadMode,
-                      onToggle: () => setState(() =>
-                      _isDownloadMode = !_isDownloadMode),
+                      onToggle: () => setState(
+                        () => _isDownloadMode = !_isDownloadMode),
                     ),
                   ]),
                   const SizedBox(height: 20),
@@ -1239,7 +1482,6 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
     );
   }
 
-  // --- MOBILE LAYOUT ---
   Widget _buildMobileLayout() {
     final isFav = context.watch<UserProvider>().isFavorite(widget.anime.id);
     return CustomScrollView(
@@ -1326,8 +1568,8 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
                        color: kColorCoral)),
                        MorphingDownloadButton(
                          isDownloading: _isDownloadMode,
-                         onToggle: () => setState(
-                           () => _isDownloadMode = !_isDownloadMode),
+                         onToggle: () =>
+                         setState(() => _isDownloadMode = !_isDownloadMode),
                        ),
               ],
             ),
@@ -1353,8 +1595,7 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
                   epNum: _episodes[i],
                   isDownloadMode: _isDownloadMode,
                   onTap: () => _handleEpisodeTap(_episodes[i]),
-                ).animate()
-                .scale(delay: (i * 10).ms, duration: 200.ms);
+                ).animate().scale(delay: (i * 10).ms, duration: 200.ms);
               },
               childCount: _episodes.length,
             ),
@@ -1380,8 +1621,7 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
             epNum: _episodes[i],
             isDownloadMode: _isDownloadMode,
             onTap: () => _handleEpisodeTap(_episodes[i]),
-          ).animate()
-          .scale(delay: (i * 20).ms, duration: 200.ms);
+          ).animate().scale(delay: (i * 20).ms, duration: 200.ms);
         },
     );
   }
@@ -1422,8 +1662,7 @@ class MorphingDownloadButton extends StatelessWidget {
             height: 50,
             decoration: BoxDecoration(
               color: Color.lerp(Colors.white, kColorCoral, t)!,
-              borderRadius:
-              BorderRadius.circular(lerpDouble(25, 15, t)!),
+              borderRadius: BorderRadius.circular(lerpDouble(25, 15, t)!),
               boxShadow: [
                 BoxShadow(
                   color: kColorCoral.withOpacity(0.2 + (t * 0.2)),
@@ -1453,12 +1692,17 @@ class MorphingDownloadButton extends StatelessWidget {
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: const [
-                              Icon(LucideIcons.downloadCloud, color: Colors.white, size: 18),
-                              SizedBox(width: 8),
-                              Text("Select Ep to Download",
-                                   style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
-                                   SizedBox(width: 5),
-                                   Icon(LucideIcons.x, color: Colors.white70, size: 16),
+                              Icon(LucideIcons.downloadCloud,
+                                   color: Colors.white, size: 18),
+                                   SizedBox(width: 8),
+                                   Text("Select Ep to Download",
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 13)),
+                                     SizedBox(width: 5),
+                                     Icon(LucideIcons.x,
+                                          color: Colors.white70, size: 16),
                             ],
                           ),
                         ),
@@ -1477,7 +1721,17 @@ class MorphingDownloadButton extends StatelessWidget {
 class AnimeGrid extends StatelessWidget {
   final List<AnimeModel> animes;
   final Function(AnimeModel) onTap;
-  const AnimeGrid({super.key, required this.animes, required this.onTap});
+  final ScrollPhysics? physics;
+  final bool shrinkWrap;
+
+  const AnimeGrid({
+    super.key,
+    required this.animes,
+    required this.onTap,
+    this.physics = const NeverScrollableScrollPhysics(),
+    this.shrinkWrap = true,
+  });
+
   @override
   Widget build(BuildContext context) {
     final isMobile = MediaQuery.of(context).size.width < 900;
@@ -1485,8 +1739,8 @@ class AnimeGrid extends StatelessWidget {
     return Padding(
       padding: EdgeInsets.symmetric(horizontal: isMobile ? 20 : 40),
       child: GridView.builder(
-        physics: const NeverScrollableScrollPhysics(),
-        shrinkWrap: true,
+        physics: physics,
+        shrinkWrap: shrinkWrap,
         gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
           maxCrossAxisExtent: isMobile ? 150 : 180,
           childAspectRatio: 0.7,
@@ -1500,7 +1754,8 @@ class AnimeGrid extends StatelessWidget {
               begin: const Offset(0.8, 0.8),
               curve: Curves.easeOutBack,
               duration: 400.ms,
-            ).fadeIn(duration: 300.ms);
+            )
+            .fadeIn(duration: 300.ms);
           }),
     );
   }
@@ -1548,8 +1803,7 @@ class _AnimeCardState extends State<AnimeCard> {
                 CachedNetworkImage(
                   imageUrl: widget.anime.fullImageUrl,
                   fit: BoxFit.cover,
-                  errorWidget: (_, __, ___) =>
-                  Container(color: kColorPeach)),
+                  errorWidget: (_, __, ___) => Container(color: kColorPeach)),
                   Container(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
@@ -1610,9 +1864,7 @@ class _EpisodeChipState extends State<EpisodeChip> {
             border: Border.all(
               color: isHovered
               ? kColorCoral
-              : (widget.isDownloadMode
-              ? kColorCoral
-              : kColorSoftPink),
+              : (widget.isDownloadMode ? kColorCoral : kColorSoftPink),
               width: widget.isDownloadMode ? 2 : 1),
               boxShadow: isHovered
               ? [
@@ -1630,8 +1882,8 @@ class _EpisodeChipState extends State<EpisodeChip> {
                        if (widget.isDownloadMode && isHovered)
                          const Positioned(
                            right: 8,
-                           child: Icon(LucideIcons.download,
-                                       size: 12, color: Colors.white))
+                           child:
+                           Icon(LucideIcons.download, size: 12, color: Colors.white))
               ]),
         ),
       ),
@@ -1692,7 +1944,8 @@ class _HistoryCardState extends State<HistoryCard> {
                 Padding(
                   padding: const EdgeInsets.only(right: 20),
                   child: Icon(LucideIcons.playCircle,
-                              color: kColorCoral, size: 30))
+                              color: kColorCoral, size: 30),
+                )
             ]),
           ),
         ),
@@ -1757,19 +2010,20 @@ class FeaturedCarousel extends StatelessWidget {
                                      mainAxisSize: MainAxisSize.min,
                                      children: [
                                        Container(
-                                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                         decoration: BoxDecoration(
-                                           color: kColorCoral,
-                                           borderRadius: BorderRadius.circular(8),
-                                         ),
-                                         child: const Text(
-                                           "HOT",
-                                           style: TextStyle(
-                                             color: Colors.white,
-                                             fontSize: 10,
-                                             fontWeight: FontWeight.bold,
+                                         padding: const EdgeInsets.symmetric(
+                                           horizontal: 8, vertical: 4),
+                                           decoration: BoxDecoration(
+                                             color: kColorCoral,
+                                             borderRadius: BorderRadius.circular(8),
                                            ),
-                                         ),
+                                           child: const Text(
+                                             "HOT",
+                                             style: TextStyle(
+                                               color: Colors.white,
+                                               fontSize: 10,
+                                               fontWeight: FontWeight.bold,
+                                             ),
+                                           ),
                                        ),
                                        const SizedBox(height: 5),
                                        Text(
@@ -1791,10 +2045,7 @@ class FeaturedCarousel extends StatelessWidget {
                 ),
             ),
           ).animate().slideX(
-            begin: 0.2,
-            end: 0,
-            delay: (index * 100).ms,
-            curve: Curves.easeOut);
+            begin: 0.2, end: 0, delay: (index * 100).ms, curve: Curves.easeOut);
         },
       ),
     );
@@ -1814,7 +2065,7 @@ class GlassDock extends StatelessWidget {
       (LucideIcons.search, "Browse"),
       (LucideIcons.history, "History"),
       (LucideIcons.heart, "Favorites"),
-      (LucideIcons.info, "About")
+      (LucideIcons.settings, "Settings")
     ];
     return LiquidGlassContainer(
       borderRadius: BorderRadius.circular(30),
