@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:ui';
 import 'package:animeclient/api/ani_core.dart';
@@ -7,12 +8,20 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:open_file/open_file.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+
+// --- APP CONSTANTS ---
+const String kAppVersion = "1.6.0";
+const String kBuildNumber = "160";
 
 // --- THEME COLORS ---
 const kColorCream = Color(0xFFFEEAC9);
@@ -34,6 +43,312 @@ void main() {
       child: const AniCliApp(),
     ),
   );
+}
+
+// --- UPDATER SERVICE ---
+class UpdaterService {
+  static const String _releaseUrl =
+  "https://api.github.com/repos/minhmc2007/AniCli-Flutter/releases/latest";
+
+static String? _extractSemVer(String raw) {
+  final RegExp regExp = RegExp(r'(\d+)\.(\d+)(\.(\d+))?');
+  final match = regExp.firstMatch(raw);
+  if (match != null) {
+    String major = match.group(1) ?? "0";
+    String minor = match.group(2) ?? "0";
+    String patch = match.group(4) ?? "0";
+    return "$major.$minor.$patch";
+  }
+  return null;
+}
+
+static bool _isNewer(String current, String remote) {
+  try {
+    List<int> cParts = current.split('.').map(int.parse).toList();
+    List<int> rParts = remote.split('.').map(int.parse).toList();
+
+    for (int i = 0; i < 3; i++) {
+      int c = (i < cParts.length) ? cParts[i] : 0;
+      int r = (i < rParts.length) ? rParts[i] : 0;
+      if (r > c) return true;
+      if (r < c) return false;
+    }
+  } catch (e) {
+    debugPrint("Version parsing error: $e");
+  }
+  return false;
+}
+
+static Future<void> checkAndUpdate(BuildContext context) async {
+  try {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("Checking for updates...")));
+
+    final response = await http.get(Uri.parse(_releaseUrl));
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      String remoteTag = data['tag_name'];
+      String body = data['body'];
+      List assets = data['assets'];
+
+      String? cleanCurrent = _extractSemVer(kAppVersion);
+      String? cleanRemote = _extractSemVer(remoteTag);
+
+      if (cleanCurrent != null &&
+        cleanRemote != null &&
+        _isNewer(cleanCurrent, cleanRemote)) {
+        if (context.mounted) {
+          _showCozyUpdateDialog(context, remoteTag, body, assets);
+        }
+        } else {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text("You are up to date! ($kAppVersion)"),
+              backgroundColor: Colors.green));
+          }
+        }
+    } else {
+      throw Exception("GitHub API returned ${response.statusCode}");
+    }
+  } catch (e) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text("Update check failed: $e"),
+        backgroundColor: kColorCoral));
+    }
+  }
+}
+
+static void _showCozyUpdateDialog(
+  BuildContext context, String version, String notes, List assets) {
+  showGeneralDialog(
+    context: context,
+    barrierDismissible: true,
+    barrierLabel: "Dismiss",
+    barrierColor: Colors.black.withOpacity(0.6),
+    pageBuilder: (ctx, anim1, anim2) {
+      return Center(
+        child: Material(
+          color: Colors.transparent,
+          child: Container(
+            width: MediaQuery.of(context).size.width * 0.85,
+            constraints: const BoxConstraints(maxWidth: 500, maxHeight: 600),
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(25),
+              border: Border.all(color: kColorCream, width: 4),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.2),
+                  blurRadius: 30,
+                  offset: const Offset(0, 15),
+                )
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: kColorCoral.withOpacity(0.1),
+                        shape: BoxShape.circle),
+                        child: const Icon(LucideIcons.sparkles,
+                                          color: kColorCoral, size: 24),
+                    ),
+                    const SizedBox(width: 15),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text("New Version Available",
+                               style: GoogleFonts.inter(
+                                 fontSize: 18,
+                                 fontWeight: FontWeight.bold,
+                                 color: kColorDarkText)),
+                                 Text(version,
+                                      style: GoogleFonts.inter(
+                                        fontSize: 14,
+                                        color: kColorCoral,
+                                        fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ).animate().slideY(begin: -0.2, end: 0, duration: 400.ms).fadeIn(),
+                const SizedBox(height: 20),
+                Divider(color: kColorPeach.withOpacity(0.5)),
+                const SizedBox(height: 10),
+                Flexible(
+                  child: SingleChildScrollView(
+                    physics: const BouncingScrollPhysics(),
+                    child: MarkdownBody(
+                      data: notes,
+                      styleSheet: MarkdownStyleSheet(
+                        p: GoogleFonts.inter(
+                          color: kColorDarkText, fontSize: 14),
+                          h1: GoogleFonts.inter(
+                            color: kColorDarkText,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 20),
+                            h2: GoogleFonts.inter(
+                              color: kColorDarkText,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 18),
+                              h3: GoogleFonts.inter(
+                                color: kColorDarkText,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16),
+                                listBullet: GoogleFonts.inter(color: kColorCoral),
+                                strong: GoogleFonts.inter(
+                                  fontWeight: FontWeight.bold, color: kColorCoral),
+                                  code: GoogleFonts.jetBrainsMono(
+                                    backgroundColor: kColorCream,
+                                    color: kColorDarkText),
+                      ),
+                    ),
+                  ),
+                ).animate(delay: 200.ms).fadeIn().slideX(begin: 0.1, end: 0),
+                const SizedBox(height: 20),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: Text("Later",
+                                  style: GoogleFonts.inter(
+                                    color: Colors.black54,
+                                    fontWeight: FontWeight.w600)),
+                    ),
+                    const SizedBox(width: 10),
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: kColorCoral,
+                        foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(15)),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 20, vertical: 12),
+                              elevation: 0,
+                      ),
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        _performUpdate(context, assets, version);
+                      },
+                      icon: const Icon(LucideIcons.downloadCloud, size: 18),
+                      label: Text("Update Now",
+                                  style: GoogleFonts.inter(
+                                    fontWeight: FontWeight.bold)),
+                    ),
+                  ],
+                ).animate(delay: 400.ms).fadeIn().slideY(begin: 0.2, end: 0),
+              ],
+            ),
+          ),
+        ),
+      );
+    },
+    transitionBuilder: (ctx, anim1, anim2, child) {
+      return Transform.scale(
+        scale: Curves.easeOutBack.transform(anim1.value),
+        child: Opacity(
+          opacity: anim1.value,
+          child: child,
+        ),
+      );
+    },
+    transitionDuration: const Duration(milliseconds: 400),
+  );
+  }
+
+  static Future<void> _performUpdate(
+    BuildContext context, List assets, String version) async {
+      String? downloadUrl;
+      String fileName = "";
+
+      if (Platform.isAndroid) {
+        final asset = assets.firstWhere(
+          (a) => a['name'].toString().endsWith('.apk'),
+          orElse: () => null);
+        downloadUrl = asset?['browser_download_url'];
+        fileName = "AniCli_$version.apk";
+      } else if (Platform.isWindows) {
+        final asset = assets.firstWhere(
+          (a) =>
+          a['name'].toString().endsWith('.zip') ||
+          a['name'].toString().endsWith('.exe'),
+          orElse: () => null);
+        downloadUrl = asset?['browser_download_url'];
+        fileName = "AniCli_$version.zip";
+      } else if (Platform.isLinux) {
+        final asset = assets.firstWhere(
+          (a) =>
+          a['name'].toString().endsWith('.tar.gz') ||
+          a['name'].toString().endsWith('.AppImage'),
+          orElse: () => null);
+        downloadUrl = asset?['browser_download_url'];
+        fileName = "AniCli_$version.tar.gz";
+      } else {
+        launchUrl(
+          Uri.parse(
+            "https://github.com/minhmc2007/AniCli-Flutter/releases/latest"),
+            mode: LaunchMode.externalApplication);
+        return;
+      }
+
+      if (downloadUrl == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("No compatible asset found.")));
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text("Downloading $fileName..."),
+        duration: const Duration(seconds: 2)));
+
+      try {
+        final dir = await getApplicationDocumentsDirectory();
+        String savePath = "${dir.path}/$fileName";
+
+        if (Platform.isAndroid) {
+          final tempDir = await getExternalStorageDirectory();
+          if (tempDir != null) savePath = "${tempDir.path}/$fileName";
+        }
+
+        final response = await http.get(Uri.parse(downloadUrl));
+        final file = File(savePath);
+        await file.writeAsBytes(response.bodyBytes);
+
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text("Download complete! Launching..."),
+            backgroundColor: Colors.green));
+        }
+
+        if (Platform.isAndroid) {
+          await OpenFile.open(savePath);
+        } else {
+          if (Platform.isWindows || Platform.isLinux) {
+            await launchUrl(Uri.directory(file.parent.path));
+            if (context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                content:
+                Text("Update downloaded. Please extract/install manually."),
+                duration: Duration(seconds: 5)));
+            }
+          }
+        }
+      } catch (e) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text("Update error: $e")));
+        }
+      }
+    }
 }
 
 // --- SETTINGS PROVIDER ---
@@ -63,7 +378,6 @@ class AniCliApp extends StatelessWidget {
         ),
         useMaterial3: true,
         iconTheme: const IconThemeData(color: kColorDarkText),
-        // CRITICAL: ZoomPageTransitionsBuilder provides the best Hero flight experience
         pageTransitionsTheme: const PageTransitionsTheme(
           builders: {
             TargetPlatform.android: ZoomPageTransitionsBuilder(),
@@ -107,7 +421,8 @@ class LiquidGlassContainer extends StatelessWidget {
           decoration: BoxDecoration(
             color: Colors.white.withOpacity(opacity),
             borderRadius: rRadius,
-            border: border ?? Border.all(color: Colors.white.withOpacity(0.6), width: 1.5),
+            border: border ??
+            Border.all(color: Colors.white.withOpacity(0.6), width: 1.5),
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
@@ -148,17 +463,33 @@ with SingleTickerProviderStateMixin {
     )..repeat(reverse: true);
 
     _topAlignmentAnimation = TweenSequence<Alignment>([
-      TweenSequenceItem(tween: Tween(begin: Alignment.topLeft, end: Alignment.topRight), weight: 1),
-      TweenSequenceItem(tween: Tween(begin: Alignment.topRight, end: Alignment.bottomRight), weight: 1),
-      TweenSequenceItem(tween: Tween(begin: Alignment.bottomRight, end: Alignment.bottomLeft), weight: 1),
-      TweenSequenceItem(tween: Tween(begin: Alignment.bottomLeft, end: Alignment.topLeft), weight: 1),
+      TweenSequenceItem(
+        tween: Tween(begin: Alignment.topLeft, end: Alignment.topRight),
+        weight: 1),
+        TweenSequenceItem(
+          tween: Tween(begin: Alignment.topRight, end: Alignment.bottomRight),
+          weight: 1),
+          TweenSequenceItem(
+            tween: Tween(begin: Alignment.bottomRight, end: Alignment.bottomLeft),
+            weight: 1),
+            TweenSequenceItem(
+              tween: Tween(begin: Alignment.bottomLeft, end: Alignment.topLeft),
+              weight: 1),
     ]).animate(_controller);
 
     _bottomAlignmentAnimation = TweenSequence<Alignment>([
-      TweenSequenceItem(tween: Tween(begin: Alignment.bottomRight, end: Alignment.bottomLeft), weight: 1),
-      TweenSequenceItem(tween: Tween(begin: Alignment.bottomLeft, end: Alignment.topLeft), weight: 1),
-      TweenSequenceItem(tween: Tween(begin: Alignment.topLeft, end: Alignment.topRight), weight: 1),
-      TweenSequenceItem(tween: Tween(begin: Alignment.topRight, end: Alignment.bottomRight), weight: 1),
+      TweenSequenceItem(
+        tween: Tween(begin: Alignment.bottomRight, end: Alignment.bottomLeft),
+        weight: 1),
+        TweenSequenceItem(
+          tween: Tween(begin: Alignment.bottomLeft, end: Alignment.topLeft),
+          weight: 1),
+          TweenSequenceItem(
+            tween: Tween(begin: Alignment.topLeft, end: Alignment.topRight),
+            weight: 1),
+            TweenSequenceItem(
+              tween: Tween(begin: Alignment.topRight, end: Alignment.bottomRight),
+              weight: 1),
     ]).animate(_controller);
   }
 
@@ -255,6 +586,7 @@ class _MainScreenState extends State<MainScreen> {
               switchInCurve: Curves.easeOutQuart,
                 switchOutCurve: Curves.easeInQuart,
                   transitionBuilder: (child, animation) {
+                    // FIX: Used SlideTransition because Tween<Offset> was provided
                     return FadeTransition(
                       opacity: animation,
                       child: SlideTransition(
@@ -267,7 +599,6 @@ class _MainScreenState extends State<MainScreen> {
                   },
                   child: KeyedSubtree(key: activeKey, child: activePage),
             ),
-
             Positioned(
               bottom: 30,
               left: 0,
@@ -1020,6 +1351,13 @@ class _SettingsViewState extends State<SettingsView> {
 
     final List<Widget> settingsItems = [
       _buildSectionTitle("General"),
+      _buildSettingCard(
+        icon: LucideIcons.downloadCloud,
+        title: "Check for Updates",
+        subtitle: "Version Check via GitHub Releases",
+        onTap: () => UpdaterService.checkAndUpdate(context),
+      ),
+      const SizedBox(height: 10),
       if (Platform.isLinux || Platform.isWindows || Platform.isMacOS)
         _buildSwitchTile(
           icon: LucideIcons.playCircle,
@@ -1058,7 +1396,7 @@ class _SettingsViewState extends State<SettingsView> {
               _buildListTile(
                 icon: LucideIcons.info,
                 title: "Version",
-                subtitle: "v1.6",
+                subtitle: "v$kAppVersion",
               ),
               Divider(
                 height: 1,
@@ -1068,7 +1406,7 @@ class _SettingsViewState extends State<SettingsView> {
                 _buildListTile(
                   icon: LucideIcons.hash,
                   title: "Build Number",
-                  subtitle: "160",
+                  subtitle: kBuildNumber,
                   onTap: _handleEasterEgg,
                 ),
             ],
@@ -1427,6 +1765,8 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
               const SizedBox(height: 25),
               Text(widget.anime.name,
                    textAlign: TextAlign.center,
+                   maxLines: 2,
+                   overflow: TextOverflow.ellipsis,
                    style: GoogleFonts.inter(
                      fontSize: 24,
                      fontWeight: FontWeight.bold,
@@ -1528,17 +1868,23 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
                 bottom: 20,
                 left: 20,
                 right: 20,
-                child: Text(widget.anime.name,
-                            textAlign: TextAlign.center,
-                            style: GoogleFonts.inter(
-                              fontSize: 24,
-                              fontWeight: FontWeight.bold,
-                              color: kColorDarkText,
-                              shadows: [
-                                Shadow(
-                                  blurRadius: 10,
-                                  color: Colors.white.withOpacity(0.5))
-                              ]))
+                child: Text(
+                  widget.anime.name,
+                  textAlign: TextAlign.center,
+                  maxLines: 2, // FIXED: Add max lines
+                  overflow: TextOverflow.ellipsis, // FIXED: Truncate with ...
+                  style: GoogleFonts.inter(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: kColorDarkText,
+                    shadows: [
+                      Shadow(
+                        blurRadius: 10,
+                        color: Colors.white.withOpacity(0.5),
+                      )
+                    ],
+                  ),
+                )
                 .animate()
                 .fadeIn()
                 .slideY(begin: 0.2, end: 0),
