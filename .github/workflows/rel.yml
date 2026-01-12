@@ -130,6 +130,7 @@ jobs:
 
   # --- CREATE RELEASE JOB ---
   # --- CREATE RELEASE JOB ---
+  # --- CREATE RELEASE JOB ---
   create-release:
     name: Create Release
     runs-on: ubuntu-latest
@@ -166,60 +167,40 @@ jobs:
         id: build_changelog
         run: |
           NEW_TAG="${{ inputs.version }}"
-          echo "Target Version: $NEW_TAG"
           
+          # Find previous tag to generate a changelog range
           PREVIOUS_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-          echo "Previous Version found in git: $PREVIOUS_TAG"
           
           if [ -z "$PREVIOUS_TAG" ]; then
-            CHANGELOG=$(git log --pretty=format:"- %s")
+            CHANGELOG=$(git log --pretty=format:"* %s")
           else
-            CHANGELOG=$(git log --pretty=format:"- %s" $PREVIOUS_TAG..HEAD)
+            CHANGELOG=$(git log --pretty=format:"* %s" $PREVIOUS_TAG..HEAD)
           fi
 
+          # Create a generic, professional release body
           cat <<EOF > release_body.md
-          🌸 $NEW_TAG: The "Cozy" Update
-          We are thrilled to announce the release of **Ani-Cli Flutter** $NEW_TAG! 🚀
+          ## Release $NEW_TAG 🚀
 
-          This release marks the complete transition from the terminal-based Bash script to a fully native, high-performance Desktop application built with Flutter. We've kept the powerful scraping logic you love but wrapped it in a stunning, modern, and "Cozy" interface.
-
-          ### ✨ New Features
-          
-          **🎨 The "Cozy" UI Overhaul**
-          *   **Live Moving Background:** A soothing, animated gradient background that slowly drifts between Cream (#FEEAC9) and Peach (#FFCDC9).
-          *   **Glassmorphism:** A floating navigation dock and search bar with milky-glass effects and dynamic blurs.
-          *   **Smooth Animations:** Everything flows. From the staggered entry of anime cards to the Hero transitions when clicking an image.
-
-          **📺 Core Functionality**
-          *   **Native MPV Integration:** The app now has MPV officially built-in! No need to install it manually on your system.
-          *   **Smart Search:** Instant scraping of the AllAnime API to find Sub and Dub anime.
-          *   **Decryption Port:** Ported the complex link decryption logic entirely to Dart for faster execution.
-
-          **💾 Persistence (History & Favorites)**
-          *   **Watch History:** Automatically tracks the episodes you watch with timestamps.
-          *   **Favorites System:** "Heart" your best shows to keep them pinned in a dedicated tab.
-          *   **Local Storage:** All data is stored locally using SharedPreferences—no account or login required.
-
-          ### 🛠 Platforms Support
-          *   **Windows:** Portable .exe (Tested on Windows 11 24H2).
-          *   **Linux:** AppImage / Bundle (Tested on Arch Linux).
-          *   **Android:** APK (Tested on SDK 30).
-          *   **macOS / iOS:** Supported (Untested - Developer is poor 💸).
+          New update for **Ani-Cli Flutter**. Please report any issues on the [Issues tab](../../issues).
 
           ### 📝 Changelog
           $CHANGELOG
 
-          ### 🤝 Credits
-          Based on the scraping logic of ani-cli.
-          Ported and designed by minhmc2007.
+          ### 📦 Downloads
+          | Platform | File |
+          | :--- | :--- |
+          | **Windows** | \`animeclient-windows.zip\` |
+          | **Linux** | \`animeclient-linux.tar.gz\` |
+          | **Android** | \`app-release.apk\` |
+          | **macOS** | \`animeclient-macos.zip\` |
+          | **iOS** | \`animeclient-unsigned.ipa\` (Unsigned) |
           EOF
 
       - name: Publish Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ inputs.version }}
-          # FIX IS HERE: Quotes added around the name string
-          name: "${{ inputs.version }}: The Cozy Update"
+          name: "Release ${{ inputs.version }}"
           body_path: release_body.md
           prerelease: false
           make_latest: true
