@@ -18,7 +18,9 @@
 
 *   **🎨 Cozy UI**: A relaxing, pastel-themed interface with live moving gradients and milky glassmorphism.
 *   **🚀 High Performance**: Built with Flutter for native performance on Linux, Windows, macOS, and iOS.
-*   **🎞️ MPV Integration**: Uses the system `mpv` player for hardware-accelerated playback and high compatibility.
+*   **🎞️ Dual Player Support**:
+    *   **Built-in MPV**: Ready to use out of the box.
+    *   **System MPV**: Connects to your local MPV installation for maximum hardware acceleration and custom configuration.
 *   **❤️ Favorites**: Save your favorite shows for quick access.
 *   **clock History**: Automatically tracks watched episodes and saves your progress locally.
 *   **🔍 Powerful Search**: Scrapes `AllAnime` API for a vast library of Sub and Dub anime.
@@ -28,7 +30,13 @@
 
 ## 🛠️ Prerequisites
 
-Before running the app on Desktop, you **must** have `mpv` installed on your system. This app acts as a frontend controller for MPV.
+**Note on Video Players:**
+This app comes with a **Built-in MPV** player, so you can run it immediately without external dependencies.
+
+**However, the developer strongly recommends using System MPV.**
+Switching to the System MPV (via settings) provides the best experience, including better hardware acceleration, higher format compatibility, and lower resource usage.
+
+If you wish to use the System Player, please install `mpv`:
 
 ### Linux (Arch/Manjaro)
 ```bash
@@ -80,19 +88,6 @@ flutter run -d macos
 
 ## 📦 Building for Release
 
-### Linux (AppImage)
-To create a portable `.AppImage`, ensure you have `linuxdeploy` installed.
-
-```bash
-# Build the release binary
-flutter build linux --release
-
-# Setup AppDir
-mkdir -p AppDir/usr/bin
-cp -r build/linux/x64/release/bundle/* AppDir/usr/bin/
-# (See repository build scripts for full AppImage generation steps)
-```
-
 ### Windows (EXE)
 ```powershell
 flutter build windows --release
@@ -104,14 +99,20 @@ The output file will be in `build\windows\x64\runner\Release\`.
 flutter build macos --release
 ```
 
+### Linux (Debian/RPM/Tarball)
+```bash
+flutter build linux --release
+```
+The binary will be located in `build/linux/x64/release/bundle/`.
+
 ---
 
 ## 🏗️ Architecture
 
 This project follows a clean separation of concerns:
 
-*   **`lib/api/ani_core.dart`**: The "Brain". Contains the port of the Bash script logic. Handles GraphQL queries, decryption of source links, and launching the MPV process.
-*   **`lib/user_provider.dart`**: State Management. Uses `Provider` and `SharedPreferences` to handle History and Favorites persistence.
+*   **`lib/api/ani_core.dart`**: The "Brain". Contains the port of the Bash script logic. Handles GraphQL queries, decryption of source links, and managing player processes.
+*   **`lib/user_provider.dart`**: State Management. Uses `Provider` and `SharedPreferences` to handle History, Favorites, and Player settings persistence.
 *   **`lib/main.dart`**: The UI. Contains the `LiveGradientBackground`, `GlassDock`, and all visual views.
 
 ---
