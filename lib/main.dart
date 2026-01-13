@@ -22,8 +22,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 // --- APP CONSTANTS ---
-const String kAppVersion = "1.6.1";
-const String kBuildNumber = "161";
+const String kAppVersion = "1.6.3";
+const String kBuildNumber = "163";
 
 // --- THEME COLORS ---
 const kColorCream = Color(0xFFFEEAC9);
@@ -473,6 +473,7 @@ class CozyHeroImage extends StatelessWidget {
   final String imageUrl;
   final double radius;
   final bool withShadow;
+  final BoxFit boxFit;
 
   const CozyHeroImage({
     super.key,
@@ -480,12 +481,11 @@ class CozyHeroImage extends StatelessWidget {
     required this.imageUrl,
     this.radius = 20.0,
     this.withShadow = true,
+    this.boxFit = BoxFit.cover,
   });
 
   @override
   Widget build(BuildContext context) {
-    // We wrap the entire visual block (Container + Image) in the Hero
-    // This allows the shadow to animate during flight
     return Hero(
       tag: heroTag,
       child: Material(
@@ -508,7 +508,7 @@ class CozyHeroImage extends StatelessWidget {
             borderRadius: BorderRadius.circular(radius),
             child: CachedNetworkImage(
               imageUrl: imageUrl,
-              fit: BoxFit.cover,
+              fit: boxFit, // Use the passed fit
               alignment: Alignment.center,
               placeholder: (context, url) => Container(color: kColorPeach),
               errorWidget: (context, url, error) => Container(color: kColorPeach),
@@ -2006,65 +2006,87 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
 
   Widget _buildMobileLayout() {
     final isFav = context.watch<UserProvider>().isFavorite(widget.anime.id);
+    // FIX: Fixed height for mobile header to ensure consistency across all image sizes
+    final headerHeight = MediaQuery.of(context).size.height * 0.55;
+
     return CustomScrollView(
       physics: const BouncingScrollPhysics(),
       slivers: [
         SliverToBoxAdapter(
-          child: Stack(
-            children: [
-              CozyHeroImage(
-                heroTag: widget.heroTag,
-                imageUrl: widget.anime.fullImageUrl,
-                radius: 0,
-              ),
-              Positioned(
-                top: 50,
-                left: 20,
-                right: 20,
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    _buildCircleBtn(LucideIcons.arrowLeft, _onBack),
-                    _buildCircleBtn(
-                      isFav ? LucideIcons.heart : LucideIcons.heart,
-                      () => context
-                      .read<UserProvider>()
-                      .toggleFavorite(widget.anime),
-                      color: isFav ? kColorCoral : Colors.black26,
-                      fill: isFav,
-                    ),
-                  ],
+          child: SizedBox(
+            height: headerHeight,
+            child: Stack(
+              fit: StackFit.expand, // Force children to fill the height
+              children: [
+                CozyHeroImage(
+                  heroTag: widget.heroTag,
+                  imageUrl: widget.anime.fullImageUrl,
+                  radius: 0,
+                  boxFit: BoxFit.cover, // Ensure image zooms to fill
                 ),
-              ),
-              Positioned(
-                bottom: 20,
-                left: 20,
-                right: 20,
-                child: Hero(
-                  tag: "title_${widget.heroTag}",
-                  child: Material(
-                    color: Colors.transparent,
-                    child: Text(
-                      widget.anime.name,
-                      textAlign: TextAlign.center,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.inter(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        color: kColorDarkText,
-                        shadows: [
-                          Shadow(
-                            blurRadius: 10,
-                            color: Colors.white.withOpacity(0.5),
-                          )
-                        ],
-                      ),
+                // Gradient Overlay
+                Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        Colors.transparent,
+                        Colors.black.withOpacity(0.7),
+                      ],
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      stops: const [0.6, 1.0],
                     ),
                   ),
                 ),
-              )
-            ],
+                Positioned(
+                  top: 50,
+                  left: 20,
+                  right: 20,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      _buildCircleBtn(LucideIcons.arrowLeft, _onBack),
+                      _buildCircleBtn(
+                        isFav ? LucideIcons.heart : LucideIcons.heart,
+                        () => context
+                        .read<UserProvider>()
+                        .toggleFavorite(widget.anime),
+                        color: isFav ? kColorCoral : Colors.black26,
+                        fill: isFav,
+                      ),
+                    ],
+                  ),
+                ),
+                Positioned(
+                  bottom: 20,
+                  left: 20,
+                  right: 20,
+                  child: Hero(
+                    tag: "title_${widget.heroTag}",
+                    child: Material(
+                      color: Colors.transparent,
+                      child: Text(
+                        widget.anime.name,
+                        textAlign: TextAlign.center,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.inter(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white, // Ensure white text on gradient
+                          shadows: [
+                            Shadow(
+                              blurRadius: 10,
+                              color: Colors.black.withOpacity(0.5),
+                            )
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                )
+              ],
+            ),
           ),
         ),
         SliverToBoxAdapter(
