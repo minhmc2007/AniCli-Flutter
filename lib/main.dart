@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui';
-// Ensure this points to your actual API file
 import 'package:animeclient/api/ani_core.dart';
 import 'package:animeclient/user_provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -22,8 +21,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 // --- APP CONSTANTS ---
-const String kAppVersion = "1.6.3";
-const String kBuildNumber = "163";
+const String kAppVersion = "1.6.1";
+const String kBuildNumber = "161";
 
 // --- THEME COLORS ---
 const kColorCream = Color(0xFFFEEAC9);
