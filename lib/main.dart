@@ -16,13 +16,14 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:open_file/open_file.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 // --- APP CONSTANTS ---
-const String kAppVersion = "1.6.1";
-const String kBuildNumber = "161";
+const String kAppVersion = "1.6.2";
+const String kBuildNumber = "162";
 
 // --- THEME COLORS ---
 const kColorCream = Color(0xFFFEEAC9);
@@ -47,7 +48,6 @@ void main() {
   );
 }
 
-// --- UPDATER SERVICE ---
 class UpdaterService {
   static const String _releaseUrl =
   "https://api.github.com/repos/minhmc2007/AniCli-Flutter/releases/latest";
@@ -181,7 +181,10 @@ static void _showCozyUpdateDialog(
                       ),
                     ),
                   ],
-                ).animate().slideY(begin: -0.2, end: 0, duration: 400.ms).fadeIn(),
+                )
+                .animate()
+                .slideY(begin: -0.2, end: 0, duration: 400.ms)
+                .fadeIn(),
                 const SizedBox(height: 20),
                 Divider(color: kColorPeach.withOpacity(0.5)),
                 const SizedBox(height: 10),
@@ -191,24 +194,26 @@ static void _showCozyUpdateDialog(
                     child: MarkdownBody(
                       data: notes,
                       styleSheet: MarkdownStyleSheet(
-                        p: GoogleFonts.inter(color: kColorDarkText, fontSize: 14),
-                        h1: GoogleFonts.inter(
-                          color: kColorDarkText,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 20),
-                          h2: GoogleFonts.inter(
+                        p: GoogleFonts.inter(
+                          color: kColorDarkText, fontSize: 14),
+                          h1: GoogleFonts.inter(
                             color: kColorDarkText,
                             fontWeight: FontWeight.bold,
-                            fontSize: 18),
-                            h3: GoogleFonts.inter(
+                            fontSize: 20),
+                            h2: GoogleFonts.inter(
                               color: kColorDarkText,
                               fontWeight: FontWeight.bold,
-                              fontSize: 16),
-                              listBullet: GoogleFonts.inter(color: kColorCoral),
-                              strong: GoogleFonts.inter(
-                                fontWeight: FontWeight.bold, color: kColorCoral),
-                                code: GoogleFonts.jetBrainsMono(
-                                  backgroundColor: kColorCream, color: kColorDarkText),
+                              fontSize: 18),
+                              h3: GoogleFonts.inter(
+                                color: kColorDarkText,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16),
+                                listBullet: GoogleFonts.inter(color: kColorCoral),
+                                strong: GoogleFonts.inter(
+                                  fontWeight: FontWeight.bold, color: kColorCoral),
+                                  code: GoogleFonts.jetBrainsMono(
+                                    backgroundColor: kColorCream,
+                                    color: kColorDarkText),
                       ),
                     ),
                   ),
@@ -241,7 +246,8 @@ static void _showCozyUpdateDialog(
                       },
                       icon: const Icon(LucideIcons.downloadCloud, size: 18),
                       label: Text("Update Now",
-                                  style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
+                                  style:
+                                  GoogleFonts.inter(fontWeight: FontWeight.bold)),
                     ),
                   ],
                 ).animate(delay: 400.ms).fadeIn().slideY(begin: 0.2, end: 0),
@@ -269,7 +275,28 @@ static void _showCozyUpdateDialog(
       String? downloadUrl;
       String fileName = "";
 
+      // --- CHECK PERMISSIONS ON ANDROID ---
       if (Platform.isAndroid) {
+        // 1. Check/Request Storage Permissions (For older Android versions mainly)
+        var status = await Permission.storage.status;
+        if (!status.isGranted) {
+          await Permission.storage.request();
+        }
+
+        // 2. Check/Request Install Packages Permission (Android 8+)
+        var installStatus = await Permission.requestInstallPackages.status;
+        if (!installStatus.isGranted) {
+          installStatus = await Permission.requestInstallPackages.request();
+          if (!installStatus.isGranted) {
+            if (context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                content: Text(
+                  "Permission denied. Cannot install updates without 'Install Unknown Apps' permission.")));
+            }
+            return;
+          }
+        }
+
         final asset = assets.firstWhere(
           (a) => a['name'].toString().endsWith('.apk'),
           orElse: () => null);
@@ -314,6 +341,7 @@ static void _showCozyUpdateDialog(
         String savePath = "${dir.path}/$fileName";
 
         if (Platform.isAndroid) {
+          // Use external storage for APKs so the installer can read it easily
           final tempDir = await getExternalStorageDirectory();
           if (tempDir != null) savePath = "${tempDir.path}/$fileName";
         }
@@ -329,7 +357,16 @@ static void _showCozyUpdateDialog(
         }
 
         if (Platform.isAndroid) {
-          await OpenFile.open(savePath);
+          // Explicitly specify MIME type for Android
+          final result = await OpenFile.open(savePath,
+                                             type: "application/vnd.android.package-archive");
+
+          if (result.type != ResultType.done) {
+            if (context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: Text("Install Error: ${result.message}")));
+            }
+          }
         } else {
           if (Platform.isWindows || Platform.isLinux) {
             await launchUrl(Uri.directory(file.parent.path));
@@ -510,7 +547,8 @@ class CozyHeroImage extends StatelessWidget {
               fit: boxFit, // Use the passed fit
               alignment: Alignment.center,
               placeholder: (context, url) => Container(color: kColorPeach),
-              errorWidget: (context, url, error) => Container(color: kColorPeach),
+              errorWidget: (context, url, error) =>
+              Container(color: kColorPeach),
             ),
           ),
         ),
@@ -669,8 +707,8 @@ class _MainScreenState extends State<MainScreen> {
                     return FadeTransition(
                       opacity: animation,
                       child: SlideTransition(
-                        position: Tween<Offset>(
-                          begin: const Offset(0.05, 0), end: Offset.zero)
+                        position:
+                        Tween<Offset>(begin: const Offset(0.05, 0), end: Offset.zero)
                         .animate(animation),
                         child: child,
                       ),
@@ -754,7 +792,9 @@ class _InternalPlayerScreenState extends State<InternalPlayerScreen> {
     _progressTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       final pos = player.state.position.inSeconds;
       if (pos > 10) {
-        context.read<ProgressProvider>().saveProgress(widget.animeId, widget.epNum, pos);
+        context
+        .read<ProgressProvider>()
+        .saveProgress(widget.animeId, widget.epNum, pos);
       }
     });
 
@@ -764,7 +804,9 @@ class _InternalPlayerScreenState extends State<InternalPlayerScreen> {
   }
 
   Future<void> _checkResume() async {
-    final savedSeconds = context.read<ProgressProvider>().getProgress(widget.animeId, widget.epNum);
+    final savedSeconds = context
+    .read<ProgressProvider>()
+    .getProgress(widget.animeId, widget.epNum);
 
     if (savedSeconds > 10) {
       player.pause();
@@ -774,19 +816,24 @@ class _InternalPlayerScreenState extends State<InternalPlayerScreen> {
         barrierDismissible: false,
         builder: (ctx) => AlertDialog(
           backgroundColor: kColorCream,
-          title: const Text("Resume Watching?", style: TextStyle(color: kColorCoral, fontWeight: FontWeight.bold)),
-          content: Text("You left off at ${_formatDuration(Duration(seconds: savedSeconds))}. Continue?"),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text("Start Over", style: TextStyle(color: Colors.black54)),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: kColorCoral, foregroundColor: Colors.white),
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text("Resume"),
-            ),
-          ],
+          title: const Text("Resume Watching?",
+                            style:
+                            TextStyle(color: kColorCoral, fontWeight: FontWeight.bold)),
+                            content: Text(
+                              "You left off at ${_formatDuration(Duration(seconds: savedSeconds))}. Continue?"),
+                              actions: [
+                                TextButton(
+                                  onPressed: () => Navigator.pop(ctx, false),
+                                  child: const Text("Start Over",
+                                                    style: TextStyle(color: Colors.black54)),
+                                ),
+                                ElevatedButton(
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: kColorCoral, foregroundColor: Colors.white),
+                                    onPressed: () => Navigator.pop(ctx, true),
+                                    child: const Text("Resume"),
+                                ),
+                              ],
         ),
       );
 
@@ -823,13 +870,19 @@ class _InternalPlayerScreenState extends State<InternalPlayerScreen> {
     player.seek(newPos);
 
     setState(() {
-      if (isForward) _showForward = true;
-      else _showRewind = true;
+      if (isForward)
+        _showForward = true;
+      else
+        _showRewind = true;
     });
 
-      Future.delayed(const Duration(milliseconds: 600), () {
-        if (mounted) setState(() { _showForward = false; _showRewind = false; });
-      });
+    Future.delayed(const Duration(milliseconds: 600), () {
+      if (mounted)
+        setState(() {
+          _showForward = false;
+          _showRewind = false;
+        });
+    });
   }
 
   @override
@@ -838,7 +891,9 @@ class _InternalPlayerScreenState extends State<InternalPlayerScreen> {
     _hideTimer?.cancel();
     final pos = player.state.position.inSeconds;
     if (pos > 10) {
-      context.read<ProgressProvider>().saveProgress(widget.animeId, widget.epNum, pos);
+      context
+      .read<ProgressProvider>()
+      .saveProgress(widget.animeId, widget.epNum, pos);
     }
     // FIX: Force stop audio immediately before disposal
     player.stop();
@@ -871,35 +926,45 @@ class _InternalPlayerScreenState extends State<InternalPlayerScreen> {
             // Gesture Layer
             Row(
               children: [
-                Expanded(child: GestureDetector(
-                  behavior: HitTestBehavior.translucent,
-                  onTap: _toggleControls,
-                  onDoubleTap: () => _handleDoubleTap(false),
-                  child: Container(color: Colors.transparent),
-                )),
-                Expanded(child: GestureDetector(
-                  behavior: HitTestBehavior.translucent,
-                  onTap: _toggleControls,
-                  onDoubleTap: () => _handleDoubleTap(true),
-                  child: Container(color: Colors.transparent),
-                )),
+                Expanded(
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.translucent,
+                    onTap: _toggleControls,
+                    onDoubleTap: () => _handleDoubleTap(false),
+                    child: Container(color: Colors.transparent),
+                  )),
+                Expanded(
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.translucent,
+                    onTap: _toggleControls,
+                    onDoubleTap: () => _handleDoubleTap(true),
+                    child: Container(color: Colors.transparent),
+                  )),
               ],
             ),
 
             // Feedback Animations
             if (_showRewind)
-              Align(alignment: Alignment.centerLeft, child: Padding(padding: const EdgeInsets.only(left: 50), child: _buildFeedbackIcon(LucideIcons.rewind, "-10s"))),
-              if (_showForward)
-                Align(alignment: Alignment.centerRight, child: Padding(padding: const EdgeInsets.only(right: 50), child: _buildFeedbackIcon(LucideIcons.fastForward, "+10s"))),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 50),
+                  child: _buildFeedbackIcon(LucideIcons.rewind, "-10s"))),
+                  if (_showForward)
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: Padding(
+                        padding: const EdgeInsets.only(right: 50),
+                        child:
+                        _buildFeedbackIcon(LucideIcons.fastForward, "+10s"))),
 
-                // Custom Controls
-                if (_showControls)
-                  CustomMobileControls(
-                    controller: controller,
-                    title: widget.title,
-                    onClose: () => Navigator.pop(context),
-                    formatDuration: _formatDuration
-                  ),
+                        // Custom Controls
+                        if (_showControls)
+                          CustomMobileControls(
+                            controller: controller,
+                            title: widget.title,
+                            onClose: () => Navigator.pop(context),
+                            formatDuration: _formatDuration),
           ],
         ),
       ),
@@ -907,8 +972,14 @@ class _InternalPlayerScreenState extends State<InternalPlayerScreen> {
   }
 
   Widget _buildFeedbackIcon(IconData icon, String text) {
-    return Column(mainAxisSize: MainAxisSize.min, children: [Icon(icon, color: Colors.white.withOpacity(0.8), size: 40), Text(text, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))])
-    .animate().scale(duration: 200.ms, curve: Curves.easeOutBack).fadeOut(delay: 300.ms, duration: 300.ms);
+    return Column(mainAxisSize: MainAxisSize.min, children: [
+      Icon(icon, color: Colors.white.withOpacity(0.8), size: 40),
+      Text(text,
+           style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))
+    ])
+    .animate()
+    .scale(duration: 200.ms, curve: Curves.easeOutBack)
+    .fadeOut(delay: 300.ms, duration: 300.ms);
   }
 }
 
@@ -953,8 +1024,17 @@ class _CustomMobileControlsState extends State<CustomMobileControls> {
             padding: const EdgeInsets.symmetric(horizontal: 8),
             child: Row(
               children: [
-                IconButton(icon: const Icon(Icons.arrow_back, color: Colors.white), onPressed: widget.onClose),
-                Expanded(child: Text(widget.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16))),
+                IconButton(
+                  icon: const Icon(Icons.arrow_back, color: Colors.white),
+                  onPressed: widget.onClose),
+                  Expanded(
+                    child: Text(widget.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16))),
               ],
             ),
           ),
@@ -973,8 +1053,12 @@ class _CustomMobileControlsState extends State<CustomMobileControls> {
                       stream: widget.controller.player.stream.position,
                       initialData: widget.controller.player.state.position,
                       builder: (context, snapshot) {
-                        final pos = _isDragging ? Duration(seconds: _dragValue.toInt()) : (snapshot.data ?? Duration.zero);
-                        return Text(widget.formatDuration(pos), style: const TextStyle(color: Colors.white, fontSize: 12));
+                        final pos = _isDragging
+                        ? Duration(seconds: _dragValue.toInt())
+                        : (snapshot.data ?? Duration.zero);
+                        return Text(widget.formatDuration(pos),
+                        style: const TextStyle(
+                          color: Colors.white, fontSize: 12));
                       },
                     ),
                     const SizedBox(width: 10),
@@ -992,24 +1076,43 @@ class _CustomMobileControlsState extends State<CustomMobileControls> {
                               final position = posSnap.data ?? Duration.zero;
                               final max = duration.inSeconds.toDouble();
                               final isValid = max > 0;
-                              final val = _isDragging ? _dragValue : position.inSeconds.toDouble();
+                              final val = _isDragging
+                              ? _dragValue
+                              : position.inSeconds.toDouble();
 
                               return SliderTheme(
                                 data: SliderThemeData(
                                   trackHeight: 4,
-                                  thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
-                                  overlayShape: const RoundSliderOverlayShape(overlayRadius: 20),
-                                  activeTrackColor: kColorCoral,
-                                  inactiveTrackColor: Colors.white24,
-                                  thumbColor: kColorCoral,
-                                  overlayColor: kColorCoral.withOpacity(0.2),
+                                  thumbShape: const RoundSliderThumbShape(
+                                    enabledThumbRadius: 8),
+                                    overlayShape: const RoundSliderOverlayShape(
+                                      overlayRadius: 20),
+                                      activeTrackColor: kColorCoral,
+                                      inactiveTrackColor: Colors.white24,
+                                      thumbColor: kColorCoral,
+                                      overlayColor: kColorCoral.withOpacity(0.2),
                                 ),
                                 child: Slider(
                                   value: isValid ? val.clamp(0.0, max) : 0.0,
                                   min: 0.0,
                                   max: isValid ? max : 1.0,
-                                  onChanged: isValid ? (v) { setState(() { _isDragging = true; _dragValue = v; }); } : null,
-                                  onChangeEnd: isValid ? (v) { widget.controller.player.seek(Duration(seconds: v.toInt())); setState(() { _isDragging = false; }); } : null,
+                                  onChanged: isValid
+                                  ? (v) {
+                                    setState(() {
+                                      _isDragging = true;
+                                      _dragValue = v;
+                                    });
+                                  }
+                                  : null,
+                                  onChangeEnd: isValid
+                                  ? (v) {
+                                    widget.controller.player.seek(
+                                      Duration(seconds: v.toInt()));
+                                    setState(() {
+                                      _isDragging = false;
+                                    });
+                                  }
+                                  : null,
                                 ),
                               );
                             },
@@ -1022,7 +1125,10 @@ class _CustomMobileControlsState extends State<CustomMobileControls> {
                     StreamBuilder<Duration>(
                       stream: widget.controller.player.stream.duration,
                       initialData: widget.controller.player.state.duration,
-                      builder: (context, snapshot) => Text(widget.formatDuration(snapshot.data ?? Duration.zero), style: const TextStyle(color: Colors.white, fontSize: 12)),
+                      builder: (context, snapshot) => Text(
+                        widget.formatDuration(snapshot.data ?? Duration.zero),
+                        style: const TextStyle(
+                          color: Colors.white, fontSize: 12)),
                     ),
                   ],
                 ),
@@ -1030,19 +1136,31 @@ class _CustomMobileControlsState extends State<CustomMobileControls> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
-                    IconButton(icon: const Icon(Icons.replay_10, color: Colors.white, size: 32), onPressed: () => widget.controller.player.seek(widget.controller.player.state.position - const Duration(seconds: 10))),
-                    StreamBuilder<bool>(
-                      stream: widget.controller.player.stream.playing,
-                      initialData: widget.controller.player.state.playing,
-                      builder: (context, snapshot) {
-                        final isPlaying = snapshot.data ?? false;
-                        return CenterPlayButton(
-                          isPlaying: isPlaying,
-                          onPressed: () => isPlaying ? widget.controller.player.pause() : widget.controller.player.play(),
-                        );
-                      },
-                    ),
-                    IconButton(icon: const Icon(Icons.forward_10, color: Colors.white, size: 32), onPressed: () => widget.controller.player.seek(widget.controller.player.state.position + const Duration(seconds: 10))),
+                    IconButton(
+                      icon: const Icon(Icons.replay_10,
+                                       color: Colors.white, size: 32),
+                               onPressed: () => widget.controller.player.seek(
+                                 widget.controller.player.state.position -
+                                 const Duration(seconds: 10))),
+                                 StreamBuilder<bool>(
+                                   stream: widget.controller.player.stream.playing,
+                                   initialData: widget.controller.player.state.playing,
+                                   builder: (context, snapshot) {
+                                     final isPlaying = snapshot.data ?? false;
+                                     return CenterPlayButton(
+                                       isPlaying: isPlaying,
+                                       onPressed: () => isPlaying
+                                       ? widget.controller.player.pause()
+                                       : widget.controller.player.play(),
+                                     );
+                                   },
+                                 ),
+                    IconButton(
+                      icon: const Icon(Icons.forward_10,
+                                       color: Colors.white, size: 32),
+                               onPressed: () => widget.controller.player.seek(
+                                 widget.controller.player.state.position +
+                                 const Duration(seconds: 10))),
                   ],
                 ),
               ],
@@ -1058,13 +1176,15 @@ class _CustomMobileControlsState extends State<CustomMobileControls> {
 class CenterPlayButton extends StatefulWidget {
   final bool isPlaying;
   final VoidCallback onPressed;
-  const CenterPlayButton({super.key, required this.isPlaying, required this.onPressed});
+  const CenterPlayButton(
+    {super.key, required this.isPlaying, required this.onPressed});
 
   @override
   State<CenterPlayButton> createState() => _CenterPlayButtonState();
 }
 
-class _CenterPlayButtonState extends State<CenterPlayButton> with TickerProviderStateMixin {
+class _CenterPlayButtonState extends State<CenterPlayButton>
+with TickerProviderStateMixin {
   late AnimationController _pulseCtrl;
   late AnimationController _iconCtrl;
   bool _isPressed = false;
@@ -1072,8 +1192,11 @@ class _CenterPlayButtonState extends State<CenterPlayButton> with TickerProvider
   @override
   void initState() {
     super.initState();
-    _pulseCtrl = AnimationController(vsync: this, duration: const Duration(seconds: 2))..repeat();
-    _iconCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 300));
+    _pulseCtrl = AnimationController(
+      vsync: this, duration: const Duration(seconds: 2))
+    ..repeat();
+    _iconCtrl = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 300));
     if (widget.isPlaying) _iconCtrl.forward();
   }
 
@@ -1113,13 +1236,16 @@ class _CenterPlayButtonState extends State<CenterPlayButton> with TickerProvider
             if (!widget.isPlaying)
               FadeTransition(
                 opacity: TweenSequence([
-                  TweenSequenceItem(tween: Tween(begin: 0.0, end: 0.5), weight: 50),
-                  TweenSequenceItem(tween: Tween(begin: 0.5, end: 0.0), weight: 50),
+                  TweenSequenceItem(
+                    tween: Tween(begin: 0.0, end: 0.5), weight: 50),
+                    TweenSequenceItem(
+                      tween: Tween(begin: 0.5, end: 0.0), weight: 50),
                 ]).animate(_pulseCtrl),
                 child: ScaleTransition(
                   scale: Tween(begin: 1.0, end: 1.5).animate(_pulseCtrl),
                   child: Container(
-                    width: 70, height: 70,
+                    width: 70,
+                    height: 70,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       color: kColorCoral.withOpacity(0.4),
@@ -1817,69 +1943,83 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
 
       if (url != null) {
         final useInternal = context.read<SettingsProvider>().useInternalPlayer;
-        if (!useInternal && (Platform.isLinux || Platform.isWindows || Platform.isMacOS)) {
-          final savedSeconds = context.read<ProgressProvider>().getProgress(widget.anime.id, epNum);
-          bool shouldResume = false;
+        if (!useInternal &&
+          (Platform.isLinux || Platform.isWindows || Platform.isMacOS)) {
+          final savedSeconds = context
+          .read<ProgressProvider>()
+          .getProgress(widget.anime.id, epNum);
+        bool shouldResume = false;
 
-          if (savedSeconds > 10) {
-            shouldResume = await showDialog<bool>(
-              context: context,
-              builder: (ctx) => AlertDialog(
-                backgroundColor: kColorCream,
-                title: const Text("Resume Watching?", style: TextStyle(color: kColorCoral, fontWeight: FontWeight.bold)),
-                content: Text("Continue from ${Duration(seconds: savedSeconds).toString().split('.').first}?"),
-                actions: [
-                  TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Start Over", style: TextStyle(color: Colors.black54))),
-                  ElevatedButton(
-                    style: ElevatedButton.styleFrom(backgroundColor: kColorCoral, foregroundColor: Colors.white),
-                    onPressed: () => Navigator.pop(ctx, true),
-                    child: const Text("Resume")
-                  ),
-                ],
-              ),
-            ) ?? false;
-          }
-
-          final args = [
-            url,
-            '--http-header-fields=Referer: ${AniCore.referer}',
-            '--force-media-title=${widget.anime.name} - Ep $epNum',
-            '--save-position-on-quit',
-          ];
-
-          if (shouldResume) {
-            args.add('--start=$savedSeconds');
-          }
-
-          try {
-            await Process.start('mpv', args, mode: ProcessStartMode.detached);
-          } catch (e) {
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Could not launch external MPV: $e")));
-            }
-          }
-        }
-        else {
-          Navigator.of(context).push(
-            PageRouteBuilder(
-              pageBuilder: (context, anim, secAnim) => InternalPlayerScreen(
-                streamUrl: url,
-                title: "${widget.anime.name} - Ep $epNum",
-                animeId: widget.anime.id,
-                epNum: epNum,
-              ),
-              transitionsBuilder: (context, anim, secAnim, child) {
-                return FadeTransition(
-                  opacity: anim,
-                  child: SlideTransition(
-                    position: Tween<Offset>(begin: const Offset(0, 0.1), end: Offset.zero).animate(CurvedAnimation(parent: anim, curve: Curves.easeOutCubic)),
-                    child: child,
-                  ),
-                );
-              },
+        if (savedSeconds > 10) {
+          shouldResume = await showDialog<bool>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              backgroundColor: kColorCream,
+              title: const Text("Resume Watching?",
+                                style: TextStyle(
+                                  color: kColorCoral, fontWeight: FontWeight.bold)),
+                                  content: Text(
+                                    "Continue from ${Duration(seconds: savedSeconds).toString().split('.').first}?"),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () => Navigator.pop(ctx, false),
+                                        child: const Text("Start Over",
+                                                          style: TextStyle(color: Colors.black54))),
+                                                          ElevatedButton(
+                                                            style: ElevatedButton.styleFrom(
+                                                              backgroundColor: kColorCoral,
+                                                              foregroundColor: Colors.white),
+                                                                onPressed: () => Navigator.pop(ctx, true),
+                                                                child: const Text("Resume")),
+                                    ],
             ),
-          );
+          ) ??
+          false;
         }
+
+        final args = [
+          url,
+          '--http-header-fields=Referer: ${AniCore.referer}',
+          '--force-media-title=${widget.anime.name} - Ep $epNum',
+          '--save-position-on-quit',
+        ];
+
+        if (shouldResume) {
+          args.add('--start=$savedSeconds');
+        }
+
+        try {
+          await Process.start('mpv', args, mode: ProcessStartMode.detached);
+        } catch (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text("Could not launch external MPV: $e")));
+          }
+        }
+          } else {
+            Navigator.of(context).push(
+              PageRouteBuilder(
+                pageBuilder: (context, anim, secAnim) => InternalPlayerScreen(
+                  streamUrl: url,
+                  title: "${widget.anime.name} - Ep $epNum",
+                  animeId: widget.anime.id,
+                  epNum: epNum,
+                ),
+                transitionsBuilder: (context, anim, secAnim, child) {
+                  return FadeTransition(
+                    opacity: anim,
+                    child: SlideTransition(
+                      position:
+                      Tween<Offset>(begin: const Offset(0, 0.1), end: Offset.zero)
+                      .animate(CurvedAnimation(
+                        parent: anim, curve: Curves.easeOutCubic)),
+                        child: child,
+                    ),
+                  );
+                },
+              ),
+            );
+          }
       } else {
         if (mounted) {
           ScaffoldMessenger.of(context)
