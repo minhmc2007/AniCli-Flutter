@@ -22,8 +22,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 // --- APP CONSTANTS ---
-const String kAppVersion = "1.6.3";
-const String kBuildNumber = "163";
+const String kAppVersion = "1.6.4";
+const String kBuildNumber = "164";
 
 // --- THEME COLORS ---
 const kColorCream = Color(0xFFFEEAC9);
@@ -137,15 +137,16 @@ static void _showCozyUpdateDialog(
             width: MediaQuery.of(context).size.width * 0.85,
             constraints: const BoxConstraints(maxWidth: 500, maxHeight: 600),
             padding: const EdgeInsets.all(24),
+            // Solid White Background
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(25),
-              border: Border.all(color: kColorCream, width: 4),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.2),
-                  blurRadius: 30,
-                  offset: const Offset(0, 15),
+                  color: Colors.black.withOpacity(0.3),
+                  blurRadius: 40,
+                  offset: const Offset(0, 20),
+                  spreadRadius: 5,
                 )
               ],
             ),
@@ -187,7 +188,7 @@ static void _showCozyUpdateDialog(
                 .slideY(begin: -0.2, end: 0, duration: 400.ms)
                 .fadeIn(),
                 const SizedBox(height: 20),
-                Divider(color: kColorPeach.withOpacity(0.5)),
+                Divider(color: Colors.grey.withOpacity(0.2)),
                 const SizedBox(height: 10),
                 Flexible(
                   child: SingleChildScrollView(
@@ -213,7 +214,7 @@ static void _showCozyUpdateDialog(
                                 strong: GoogleFonts.inter(
                                   fontWeight: FontWeight.bold, color: kColorCoral),
                                   code: GoogleFonts.jetBrainsMono(
-                                    backgroundColor: kColorCream,
+                                    backgroundColor: Colors.grey.shade100,
                                     color: kColorDarkText),
                       ),
                     ),
@@ -278,13 +279,11 @@ static void _showCozyUpdateDialog(
 
       // --- CHECK PERMISSIONS ON ANDROID ---
       if (Platform.isAndroid) {
-        // 1. Check/Request Storage Permissions
         var status = await Permission.storage.status;
         if (!status.isGranted) {
           await Permission.storage.request();
         }
 
-        // 2. Check/Request Install Packages Permission
         var installStatus = await Permission.requestInstallPackages.status;
         if (!installStatus.isGranted) {
           installStatus = await Permission.requestInstallPackages.request();
@@ -333,32 +332,22 @@ static void _showCozyUpdateDialog(
         return;
       }
 
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text("Downloading $fileName..."),
-        duration: const Duration(seconds: 2)));
+      // --- SHOW DOWNLOAD PROGRESS DIALOG ---
+      if (!context.mounted) return;
 
-      try {
-        final dir = await getApplicationDocumentsDirectory();
-        String savePath = "${dir.path}/$fileName";
+      final File? downloadedFile = await showDialog<File?>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => UpdateDownloadingDialog(
+          downloadUrl: downloadUrl!,
+          fileName: fileName,
+        ),
+      );
 
+      if (downloadedFile != null) {
+        // Installation Logic
         if (Platform.isAndroid) {
-          // Use external storage for APKs
-          final tempDir = await getExternalStorageDirectory();
-          if (tempDir != null) savePath = "${tempDir.path}/$fileName";
-        }
-
-        final response = await http.get(Uri.parse(downloadUrl));
-        final file = File(savePath);
-        await file.writeAsBytes(response.bodyBytes);
-
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text("Download complete! Launching..."),
-            backgroundColor: Colors.green));
-        }
-
-        if (Platform.isAndroid) {
-          final result = await OpenFile.open(savePath,
+          final result = await OpenFile.open(downloadedFile.path,
                                              type: "application/vnd.android.package-archive");
 
           if (result.type != ResultType.done) {
@@ -369,7 +358,7 @@ static void _showCozyUpdateDialog(
           }
         } else {
           if (Platform.isWindows || Platform.isLinux) {
-            await launchUrl(Uri.directory(file.parent.path));
+            await launchUrl(Uri.directory(downloadedFile.parent.path));
             if (context.mounted) {
               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                 content:
@@ -378,13 +367,454 @@ static void _showCozyUpdateDialog(
             }
           }
         }
-      } catch (e) {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text("Update error: $e")));
-        }
       }
     }
+}
+
+// --- SMOOTH DOWNLOAD DIALOG (SOLID WHITE) ---
+class UpdateDownloadingDialog extends StatefulWidget {
+  final String downloadUrl;
+  final String fileName;
+
+  const UpdateDownloadingDialog({
+    super.key,
+    required this.downloadUrl,
+    required this.fileName,
+  });
+
+  @override
+  State<UpdateDownloadingDialog> createState() =>
+  _UpdateDownloadingDialogState();
+}
+
+class _UpdateDownloadingDialogState extends State<UpdateDownloadingDialog> {
+  double _progress = 0.0;
+  String _status = "Initializing...";
+  String _sizeInfo = "";
+  final http.Client _client = http.Client();
+
+  @override
+  void initState() {
+    super.initState();
+    _startDownload();
+  }
+
+  @override
+  void dispose() {
+    _client.close();
+    super.dispose();
+  }
+
+  Future<void> _startDownload() async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      String savePath = "${dir.path}/${widget.fileName}";
+
+      if (Platform.isAndroid) {
+        final tempDir = await getExternalStorageDirectory();
+        if (tempDir != null) savePath = "${tempDir.path}/${widget.fileName}";
+      }
+
+      final file = File(savePath);
+      final request = http.Request('GET', Uri.parse(widget.downloadUrl));
+      final response = await _client.send(request);
+
+      if (response.statusCode != 200) {
+        throw Exception("Server responded with ${response.statusCode}");
+      }
+
+      final contentLength = response.contentLength ?? 0;
+      int received = 0;
+
+      final List<int> bytes = [];
+      response.stream.listen(
+        (List<int> newBytes) {
+          bytes.addAll(newBytes);
+          received += newBytes.length;
+          if (contentLength > 0) {
+            setState(() {
+              _progress = received / contentLength;
+              _status = "Downloading...";
+              _sizeInfo =
+              "${(received / 1024 / 1024).toStringAsFixed(1)} MB / ${(contentLength / 1024 / 1024).toStringAsFixed(1)} MB";
+            });
+          }
+        },
+        onDone: () async {
+          await file.writeAsBytes(bytes);
+          if (mounted) {
+            Navigator.pop(context, file);
+          }
+        },
+        onError: (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text("Download error: $e")));
+            Navigator.pop(context, null);
+          }
+        },
+        cancelOnError: true,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text("Download failed: $e"),
+          backgroundColor: kColorCoral));
+        Navigator.pop(context, null);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: false,
+      child: Center(
+        child: Material(
+          color: Colors.transparent,
+          // Solid White Container
+          child: Container(
+            width: MediaQuery.of(context).size.width * 0.85,
+            constraints: const BoxConstraints(maxWidth: 400),
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(25),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.3),
+                  blurRadius: 30,
+                  offset: const Offset(0, 15),
+                )
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: kColorCoral.withOpacity(0.1),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(LucideIcons.download,
+                                    color: kColorCoral, size: 32)
+                  .animate(onPlay: (c) => c.repeat())
+                  .shimmer(duration: 1500.ms, color: Colors.white)
+                  .scale(
+                    begin: const Offset(1, 1),
+                    end: const Offset(1.1, 1.1),
+                    duration: 1000.ms,
+                    curve: Curves.easeInOut)
+                  .then()
+                  .scale(
+                    begin: const Offset(1.1, 1.1),
+                    end: const Offset(1, 1),
+                    curve: Curves.easeInOut),
+                ),
+                const SizedBox(height: 20),
+                Text("Updating App",
+                     style: GoogleFonts.inter(
+                       fontSize: 18,
+                       fontWeight: FontWeight.bold,
+                       color: kColorDarkText)),
+                       const SizedBox(height: 5),
+                       Text(_status,
+                            style:
+                            GoogleFonts.inter(fontSize: 14, color: Colors.black54)),
+                            const SizedBox(height: 20),
+                            // Smooth Progress Bar
+                            TweenAnimationBuilder<double>(
+                              tween: Tween<double>(begin: 0, end: _progress),
+                              duration: const Duration(milliseconds: 200),
+                              curve: Curves.easeInOut,
+                              builder: (context, value, _) {
+                                return Column(
+                                  children: [
+                                    ClipRRect(
+                                      borderRadius: BorderRadius.circular(10),
+                                      child: LinearProgressIndicator(
+                                        value: value,
+                                        backgroundColor: Colors.grey.shade200,
+                                        valueColor: const AlwaysStoppedAnimation<Color>(
+                                          kColorCoral),
+                                          minHeight: 8,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 10),
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Text("${(value * 100).toInt()}%",
+                                        style: GoogleFonts.jetBrainsMono(
+                                          fontWeight: FontWeight.bold,
+                                          color: kColorCoral)),
+                                        Text(_sizeInfo,
+                                             style: GoogleFonts.inter(
+                                               fontSize: 12, color: Colors.black45)),
+                                      ],
+                                    )
+                                  ],
+                                );
+                              },
+                            ),
+                          const SizedBox(height: 25),
+                          SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton(
+                              style: OutlinedButton.styleFrom(
+                                side: const BorderSide(color: kColorCoral),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12)),
+                                  foregroundColor: kColorCoral,
+                              ),
+                              onPressed: () {
+                                _client.close(); // Cancel download
+                                Navigator.pop(context, null);
+                              },
+                              child: const Text("Cancel"),
+                            ),
+                          ),
+              ],
+            ),
+          ),
+        ),
+      ).animate().fadeIn().scale(curve: Curves.easeOutBack),
+    );
+  }
+}
+
+// --- NEW EPISODE DOWNLOAD DIALOG ---
+class EpisodeDownloadDialog extends StatefulWidget {
+  final String url;
+  final String fileName;
+
+  const EpisodeDownloadDialog({
+    super.key,
+    required this.url,
+    required this.fileName,
+  });
+
+  @override
+  State<EpisodeDownloadDialog> createState() => _EpisodeDownloadDialogState();
+}
+
+class _EpisodeDownloadDialogState extends State<EpisodeDownloadDialog> {
+  double _progress = 0.0;
+  String _status = "Starting...";
+  String _sizeInfo = "";
+  final http.Client _client = http.Client();
+
+  @override
+  void initState() {
+    super.initState();
+    _startDownload();
+  }
+
+  @override
+  void dispose() {
+    _client.close();
+    super.dispose();
+  }
+
+  Future<void> _startDownload() async {
+    try {
+      Directory? dir;
+      if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+        dir = await getDownloadsDirectory();
+      }
+      // Fallback
+      dir ??= await getApplicationDocumentsDirectory();
+
+      String savePath = "${dir.path}/${widget.fileName}";
+
+      final file = File(savePath);
+      final request = http.Request('GET', Uri.parse(widget.url));
+      // Add Referer if needed for anime streams
+      request.headers['Referer'] = AniCore.referer;
+
+      final response = await _client.send(request);
+
+      if (response.statusCode != 200) {
+        throw Exception("Server responded with ${response.statusCode}");
+      }
+
+      final contentLength = response.contentLength ?? 0;
+      int received = 0;
+
+      final List<int> bytes = [];
+      response.stream.listen(
+        (List<int> newBytes) {
+          bytes.addAll(newBytes);
+          received += newBytes.length;
+          if (contentLength > 0) {
+            setState(() {
+              _progress = received / contentLength;
+              _status = "Downloading...";
+              _sizeInfo =
+              "${(received / 1024 / 1024).toStringAsFixed(1)} MB / ${(contentLength / 1024 / 1024).toStringAsFixed(1)} MB";
+            });
+          } else {
+            setState(() {
+              _status = "Downloading (Unknown size)...";
+              _sizeInfo =
+              "${(received / 1024 / 1024).toStringAsFixed(1)} MB downloaded";
+            });
+          }
+        },
+        onDone: () async {
+          await file.writeAsBytes(bytes);
+          if (mounted) {
+            Navigator.pop(context);
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text("Saved to: $savePath"),
+              backgroundColor: Colors.green,
+              duration: const Duration(seconds: 4),
+            ));
+          }
+        },
+        onError: (e) {
+          if (mounted) {
+            Navigator.pop(context);
+            ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text("Error: $e")));
+          }
+        },
+        cancelOnError: true,
+      );
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text("Download Failed: $e"),
+          backgroundColor: kColorCoral));
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: false,
+      child: Center(
+        child: Material(
+          color: Colors.transparent,
+          // Solid White Container
+          child: Container(
+            width: MediaQuery.of(context).size.width * 0.85,
+            constraints: const BoxConstraints(maxWidth: 400),
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(25),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.3),
+                  blurRadius: 30,
+                  offset: const Offset(0, 15),
+                )
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: kColorCoral.withOpacity(0.1),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(LucideIcons.video,
+                                    color: kColorCoral, size: 32)
+                  .animate(onPlay: (c) => c.repeat())
+                  .shimmer(duration: 1500.ms, color: Colors.white)
+                  .scale(
+                    begin: const Offset(1, 1),
+                    end: const Offset(1.1, 1.1),
+                    duration: 1000.ms,
+                    curve: Curves.easeInOut)
+                  .then()
+                  .scale(
+                    begin: const Offset(1.1, 1.1),
+                    end: const Offset(1, 1),
+                    curve: Curves.easeInOut),
+                ),
+                const SizedBox(height: 20),
+                Text("Downloading Episode",
+                     style: GoogleFonts.inter(
+                       fontSize: 18,
+                       fontWeight: FontWeight.bold,
+                       color: kColorDarkText)),
+                       const SizedBox(height: 5),
+                       Text(widget.fileName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style:
+                            GoogleFonts.inter(fontSize: 13, color: Colors.black54)),
+                            const SizedBox(height: 5),
+                            Text(_status,
+                                 style:
+                                 GoogleFonts.inter(fontSize: 14, color: kColorDarkText)),
+                                 const SizedBox(height: 20),
+                                 // Smooth Progress Bar
+                                 TweenAnimationBuilder<double>(
+                                   tween: Tween<double>(begin: 0, end: _progress),
+                                   duration: const Duration(milliseconds: 200),
+                                   curve: Curves.easeInOut,
+                                   builder: (context, value, _) {
+                                     return Column(
+                                       children: [
+                                         ClipRRect(
+                                           borderRadius: BorderRadius.circular(10),
+                                           child: LinearProgressIndicator(
+                                             value: value > 0 ? value : null,
+                                             backgroundColor: Colors.grey.shade200,
+                                             valueColor: const AlwaysStoppedAnimation<Color>(
+                                               kColorCoral),
+                                               minHeight: 8,
+                                           ),
+                                         ),
+                                         const SizedBox(height: 10),
+                                         Row(
+                                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                           children: [
+                                             Text("${(value * 100).toInt()}%",
+                                             style: GoogleFonts.jetBrainsMono(
+                                               fontWeight: FontWeight.bold,
+                                               color: kColorCoral)),
+                                             Text(_sizeInfo,
+                                                  style: GoogleFonts.inter(
+                                                    fontSize: 12, color: Colors.black45)),
+                                           ],
+                                         )
+                                       ],
+                                     );
+                                   },
+                                 ),
+                          const SizedBox(height: 25),
+                          SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton(
+                              style: OutlinedButton.styleFrom(
+                                side: const BorderSide(color: kColorCoral),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12)),
+                                  foregroundColor: kColorCoral,
+                              ),
+                              onPressed: () {
+                                _client.close(); // Cancel download
+                                Navigator.pop(context);
+                              },
+                              child: const Text("Cancel"),
+                            ),
+                          ),
+              ],
+            ),
+          ),
+        ),
+      ).animate().fadeIn().scale(curve: Curves.easeOutBack),
+    );
+  }
 }
 
 // --- PROVIDERS ---
@@ -1957,14 +2387,16 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
       final url = await AniCore.getStreamUrl(widget.anime.id, epNum);
       setState(() => _loadingStatus = null);
       if (url != null) {
-        String safeName = "${widget.anime.name}-EP$epNum"
+        String safeName = "${widget.anime.name}-EP$epNum.mp4"
         .replaceAll(RegExp(r'[<>:"/\\|?*]'), '');
-        AniCore.downloadEpisode(url, safeName);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text("Downloading Episode $epNum via Aria2c..."),
-            backgroundColor: kColorCoral));
-        }
+
+        // Show Download Dialog instead of background process
+        if (!mounted) return;
+        await showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => EpisodeDownloadDialog(url: url, fileName: safeName),
+        );
       } else {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -2045,8 +2477,8 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
                   return FadeTransition(
                     opacity: anim,
                     child: SlideTransition(
-                      position:
-                      Tween<Offset>(begin: const Offset(0, 0.1), end: Offset.zero)
+                      position: Tween<Offset>(
+                        begin: const Offset(0, 0.1), end: Offset.zero)
                       .animate(CurvedAnimation(
                         parent: anim, curve: Curves.easeOutCubic)),
                         child: child,
