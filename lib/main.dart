@@ -22,8 +22,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 // --- APP CONSTANTS ---
-const String kAppVersion = "1.6.2";
-const String kBuildNumber = "162";
+const String kAppVersion = "1.6.3";
+const String kBuildNumber = "163";
 
 // --- THEME COLORS ---
 const kColorCream = Color(0xFFFEEAC9);
@@ -48,6 +48,7 @@ void main() {
   );
 }
 
+// --- UPDATER SERVICE ---
 class UpdaterService {
   static const String _releaseUrl =
   "https://api.github.com/repos/minhmc2007/AniCli-Flutter/releases/latest";
@@ -277,13 +278,13 @@ static void _showCozyUpdateDialog(
 
       // --- CHECK PERMISSIONS ON ANDROID ---
       if (Platform.isAndroid) {
-        // 1. Check/Request Storage Permissions (For older Android versions mainly)
+        // 1. Check/Request Storage Permissions
         var status = await Permission.storage.status;
         if (!status.isGranted) {
           await Permission.storage.request();
         }
 
-        // 2. Check/Request Install Packages Permission (Android 8+)
+        // 2. Check/Request Install Packages Permission
         var installStatus = await Permission.requestInstallPackages.status;
         if (!installStatus.isGranted) {
           installStatus = await Permission.requestInstallPackages.request();
@@ -341,7 +342,7 @@ static void _showCozyUpdateDialog(
         String savePath = "${dir.path}/$fileName";
 
         if (Platform.isAndroid) {
-          // Use external storage for APKs so the installer can read it easily
+          // Use external storage for APKs
           final tempDir = await getExternalStorageDirectory();
           if (tempDir != null) savePath = "${tempDir.path}/$fileName";
         }
@@ -357,14 +358,13 @@ static void _showCozyUpdateDialog(
         }
 
         if (Platform.isAndroid) {
-          // Explicitly specify MIME type for Android
           final result = await OpenFile.open(savePath,
                                              type: "application/vnd.android.package-archive");
 
           if (result.type != ResultType.done) {
             if (context.mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                content: Text("Install Error: ${result.message}")));
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text("Install Error: ${result.message}")));
             }
           }
         } else {
@@ -503,7 +503,7 @@ class LiquidGlassContainer extends StatelessWidget {
   }
 }
 
-// --- COZY HERO IMAGE (With Shadow Support for Flight) ---
+// --- COZY HERO IMAGE ---
 class CozyHeroImage extends StatelessWidget {
   final String heroTag;
   final String imageUrl;
@@ -539,12 +539,11 @@ class CozyHeroImage extends StatelessWidget {
             ]
             : [],
           ),
-          // ClipRRect needs to be inside the Container decoration to match shape
           child: ClipRRect(
             borderRadius: BorderRadius.circular(radius),
             child: CachedNetworkImage(
               imageUrl: imageUrl,
-              fit: boxFit, // Use the passed fit
+              fit: boxFit,
               alignment: Alignment.center,
               placeholder: (context, url) => Container(color: kColorPeach),
               errorWidget: (context, url, error) =>
@@ -707,8 +706,8 @@ class _MainScreenState extends State<MainScreen> {
                     return FadeTransition(
                       opacity: animation,
                       child: SlideTransition(
-                        position:
-                        Tween<Offset>(begin: const Offset(0.05, 0), end: Offset.zero)
+                        position: Tween<Offset>(
+                          begin: const Offset(0.05, 0), end: Offset.zero)
                         .animate(animation),
                         child: child,
                       ),
@@ -758,11 +757,18 @@ class InternalPlayerScreen extends StatefulWidget {
 class _InternalPlayerScreenState extends State<InternalPlayerScreen> {
   late final Player player;
   late final VideoController controller;
+
+  // Store a reference to the provider so we can use it in dispose
+  late ProgressProvider _progressProvider;
+
   bool _showControls = true;
   Timer? _hideTimer;
   Timer? _progressTimer;
+  StreamSubscription? _durationSubscription;
+
   bool _showForward = false;
   bool _showRewind = false;
+  bool _resumeChecked = false;
 
   @override
   void initState() {
@@ -782,14 +788,22 @@ class _InternalPlayerScreenState extends State<InternalPlayerScreen> {
       ),
     );
 
+    // Listen for duration to safely check resume
+    _durationSubscription = player.stream.duration.listen((duration) {
+      if (!_resumeChecked && duration.inSeconds > 0) {
+        _resumeChecked = true;
+        _checkResume();
+      }
+    });
+
     player.open(Media(
       widget.streamUrl,
       httpHeaders: {'Referer': AniCore.referer},
     ));
 
-    Future.delayed(const Duration(milliseconds: 500), _checkResume);
-
+    // Progress saving timer
     _progressTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (!mounted) return;
       final pos = player.state.position.inSeconds;
       if (pos > 10) {
         context
@@ -803,13 +817,24 @@ class _InternalPlayerScreenState extends State<InternalPlayerScreen> {
     _startHideTimer();
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Save reference to provider while context is valid
+    _progressProvider = Provider.of<ProgressProvider>(context, listen: false);
+  }
+
   Future<void> _checkResume() async {
-    final savedSeconds = context
-    .read<ProgressProvider>()
-    .getProgress(widget.animeId, widget.epNum);
+    if (!mounted) return;
+
+    // Use cached provider here or context (context is safe here since mounted check passed)
+    final savedSeconds =
+    _progressProvider.getProgress(widget.animeId, widget.epNum);
 
     if (savedSeconds > 10) {
-      player.pause();
+      await player.pause();
+
+      if (!mounted) return;
 
       final shouldResume = await showDialog<bool>(
         context: context,
@@ -837,10 +862,12 @@ class _InternalPlayerScreenState extends State<InternalPlayerScreen> {
         ),
       );
 
+      if (!mounted) return;
+
       if (shouldResume == true) {
-        player.seek(Duration(seconds: savedSeconds));
+        await player.seek(Duration(seconds: savedSeconds));
       }
-      player.play();
+      await player.play();
     }
   }
 
@@ -887,16 +914,23 @@ class _InternalPlayerScreenState extends State<InternalPlayerScreen> {
 
   @override
   void dispose() {
+    _durationSubscription?.cancel();
     _progressTimer?.cancel();
     _hideTimer?.cancel();
-    final pos = player.state.position.inSeconds;
-    if (pos > 10) {
-      context
-      .read<ProgressProvider>()
-      .saveProgress(widget.animeId, widget.epNum, pos);
-    }
-    // FIX: Force stop audio immediately before disposal
+
+    // STOP AUDIO IMMEDIATELY
     player.stop();
+
+    // Save progress using the cached provider
+    try {
+      final pos = player.state.position.inSeconds;
+      if (pos > 10) {
+        _progressProvider.saveProgress(widget.animeId, widget.epNum, pos);
+      }
+    } catch (e) {
+      debugPrint("Error saving progress in dispose: $e");
+    }
+
     player.dispose();
     super.dispose();
   }
@@ -975,7 +1009,8 @@ class _InternalPlayerScreenState extends State<InternalPlayerScreen> {
     return Column(mainAxisSize: MainAxisSize.min, children: [
       Icon(icon, color: Colors.white.withOpacity(0.8), size: 40),
       Text(text,
-           style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))
+           style: const TextStyle(
+             color: Colors.white, fontWeight: FontWeight.bold))
     ])
     .animate()
     .scale(duration: 200.ms, curve: Curves.easeOutBack)
@@ -1070,7 +1105,8 @@ class _CustomMobileControlsState extends State<CustomMobileControls> {
                         builder: (context, posSnap) {
                           return StreamBuilder<Duration>(
                             stream: widget.controller.player.stream.duration,
-                            initialData: widget.controller.player.state.duration,
+                            initialData:
+                            widget.controller.player.state.duration,
                             builder: (context, durSnap) {
                               final duration = durSnap.data ?? Duration.zero;
                               final position = posSnap.data ?? Duration.zero;
