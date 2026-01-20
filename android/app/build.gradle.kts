@@ -6,7 +6,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.animeclient"
+    namespace = "com.minhmc2077.animeclient"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 

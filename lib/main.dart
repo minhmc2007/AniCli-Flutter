@@ -1,7 +1,9 @@
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui';
+import 'dart:math' as math;
 import 'package:animeclient/api/ani_core.dart';
 import 'package:animeclient/user_provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -22,8 +24,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 // --- APP CONSTANTS ---
-const String kAppVersion = "1.6.4";
-const String kBuildNumber = "164";
+const String kAppVersion = "1.6.5";
+const String kBuildNumber = "165";
 
 // --- THEME COLORS ---
 const kColorCream = Color(0xFFFEEAC9);
@@ -32,9 +34,15 @@ const kColorSoftPink = Color(0xFFFDACAC);
 const kColorCoral = Color(0xFFFD7979);
 const kColorDarkText = Color(0xFF4A2B2B);
 
-void main() {
+// --- MAIN ENTRY POINT ---
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
+
+  final prefs = await SharedPreferences.getInstance();
+  // TODO: Change this back to normal logic after testing!
+  // Normal logic: final bool isFirstLaunch = prefs.getBool('is_first_launch') ?? true;
+  final bool isFirstLaunch = prefs.getBool('is_first_launch') ?? true;
 
   runApp(
     MultiProvider(
@@ -43,332 +51,653 @@ void main() {
         ChangeNotifierProvider(create: (_) => SettingsProvider()),
         ChangeNotifierProvider(create: (_) => ProgressProvider()),
       ],
-      child: const AniCliApp(),
+      child: AniCliApp(isFirstLaunch: isFirstLaunch),
     ),
   );
 }
+
+// --- APP ROOT ---
+class AniCliApp extends StatelessWidget {
+  final bool isFirstLaunch;
+
+  const AniCliApp({super.key, required this.isFirstLaunch});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'AniCli Flutter',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        brightness: Brightness.light,
+        scaffoldBackgroundColor: kColorCream,
+        textTheme: GoogleFonts.interTextTheme(ThemeData.light().textTheme).apply(
+          bodyColor: kColorDarkText,
+          displayColor: kColorDarkText,
+        ),
+        useMaterial3: true,
+        iconTheme: const IconThemeData(color: kColorDarkText),
+        pageTransitionsTheme: const PageTransitionsTheme(
+          builders: {
+            TargetPlatform.android: ZoomPageTransitionsBuilder(),
+            TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+            TargetPlatform.windows: ZoomPageTransitionsBuilder(),
+            TargetPlatform.linux: ZoomPageTransitionsBuilder(),
+            TargetPlatform.macOS: ZoomPageTransitionsBuilder(),
+          },
+        ),
+      ),
+      home: isFirstLaunch ? const OnboardingScreen() : const MainScreen(),
+    );
+  }
+}
+
+// ==========================================
+//      IMPROVED ONBOARDING SCREEN
+// ==========================================
+
+class OnboardingScreen extends StatefulWidget {
+  const OnboardingScreen({super.key});
+
+  @override
+  State<OnboardingScreen> createState() => _OnboardingScreenState();
+}
+
+class _OnboardingScreenState extends State<OnboardingScreen> {
+  final List<String> _greetings = ["Welcome", "こんにちは", "AniCli"];
+  int _currentIndex = 0;
+  Timer? _timer;
+  bool _isFinished = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _startGreetingCycle();
+  }
+
+  void _startGreetingCycle() {
+    _timer = Timer.periodic(const Duration(seconds: 2), (timer) {
+      if (_currentIndex < _greetings.length - 1) {
+        setState(() => _currentIndex++);
+      } else {
+        timer.cancel();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _completeOnboarding() async {
+    setState(() => _isFinished = true); // Triggers "Setting up" state
+
+    // Simulate "Getting ready" delay
+    await Future.delayed(const Duration(milliseconds: 2000));
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('is_first_launch', false);
+
+    if (mounted) {
+      Navigator.of(context).pushReplacement(
+        PageRouteBuilder(
+          pageBuilder: (_, __, ___) => const MainScreen(),
+          transitionsBuilder: (_, anim, __, child) {
+            return FadeTransition(opacity: anim, child: child);
+          },
+          transitionDuration: const Duration(milliseconds: 1000),
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      // Use a subtle gradient base so the orbs have something to blend with
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Color(0xFFFFF8F0), // Very light cream
+              Color(0xFFFEEAC9), // Your cream
+            ],
+          ),
+        ),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            // 1. Ambient Background (Vibrant Orbs)
+            const FloatingOrbsBackground(),
+
+            // 2. Content Layer (Centered)
+            Center(
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 800),
+                switchInCurve: Curves.easeOutBack,
+                  switchOutCurve: Curves.easeInBack,
+                    child: _isFinished
+                    ? _buildSetupLoader()
+                    : _buildWelcomeContent(),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSetupLoader() {
+    return Column(
+      key: const ValueKey("setup"),
+      mainAxisSize: MainAxisSize.min,
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        SizedBox(
+          width: 60,
+          height: 60,
+          child: CircularProgressIndicator(
+            strokeWidth: 5,
+            valueColor: AlwaysStoppedAnimation<Color>(kColorCoral),
+            backgroundColor: kColorPeach.withOpacity(0.5),
+          ),
+        ),
+        const SizedBox(height: 30),
+        Text(
+          "Getting things ready...",
+          style: GoogleFonts.inter(
+            fontSize: 22,
+            color: kColorDarkText,
+            fontWeight: FontWeight.w600,
+          ),
+        ).animate().fadeIn(duration: 600.ms).slideY(begin: 0.2, end: 0),
+      ],
+    );
+  }
+
+  Widget _buildWelcomeContent() {
+    return Column(
+      key: const ValueKey("welcome"),
+      mainAxisSize: MainAxisSize.min,
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        // Cycling Text
+        SizedBox(
+          height: 100, // Fixed height to prevent jumping
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 600),
+            transitionBuilder: (child, anim) {
+              return FadeTransition(
+                opacity: anim,
+                child: SlideTransition(
+                  position: Tween<Offset>(
+                    begin: const Offset(0, 0.5), end: Offset.zero)
+                  .animate(
+                    CurvedAnimation(parent: anim, curve: Curves.easeOutBack)),
+                    child: child,
+                ),
+              );
+            },
+            child: Text(
+              _greetings[_currentIndex],
+              key: ValueKey(_currentIndex),
+              textAlign: TextAlign.center,
+              style: GoogleFonts.outfit( // Outfit font looks more "Tech/Modern"
+              fontSize: 56,
+              fontWeight: FontWeight.w800,
+              color: kColorDarkText,
+              height: 1.0,
+              letterSpacing: -1.5,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 50),
+
+        // Action Button
+        AnimatedOpacity(
+          opacity: _currentIndex == _greetings.length - 1 ? 1.0 : 0.0,
+          duration: const Duration(milliseconds: 800),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOut,
+            transform: Matrix4.identity()
+            ..scale(_currentIndex == _greetings.length - 1 ? 1.0 : 0.9),
+            child: Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(30),
+                boxShadow: [
+                  BoxShadow(
+                    color: kColorCoral.withOpacity(0.4),
+                    blurRadius: 20,
+                    offset: const Offset(0, 10),
+                    spreadRadius: 2,
+                  ),
+                ],
+              ),
+              child: ElevatedButton(
+                onPressed: _currentIndex == _greetings.length - 1
+                ? _completeOnboarding
+                : null,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: kColorCoral,
+                  foregroundColor: Colors.white,
+                    padding:
+                    const EdgeInsets.symmetric(horizontal: 45, vertical: 22),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(30)),
+                      elevation: 0, // Handled by Container for better glow
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      "Get Started",
+                      style: GoogleFonts.inter(
+                        fontSize: 18, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(width: 8),
+                    const Icon(LucideIcons.arrowRight, size: 20),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// --- IMPROVED ORBS (Cleaner, More Vibrant) ---
+class FloatingOrbsBackground extends StatelessWidget {
+  const FloatingOrbsBackground({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    // We remove the massive movement to keep things centered.
+    // Instead, we use breathing (scaling) and slight rotation/drift.
+    return Stack(
+      children: [
+        // Orb 1: Top Right - Peach
+        Positioned(
+          top: -100,
+          right: -100,
+          child: _buildOrb(400, kColorPeach)
+          .animate(onPlay: (c) => c.repeat(reverse: true))
+          .scale(begin: const Offset(1, 1), end: const Offset(1.2, 1.2), duration: 6.seconds)
+          .rotate(begin: 0, end: 0.1, duration: 8.seconds),
+        ),
+        // Orb 2: Bottom Left - Coral (Softened)
+        Positioned(
+          bottom: -150,
+          left: -100,
+          child: _buildOrb(450, kColorCoral.withOpacity(0.4))
+          .animate(onPlay: (c) => c.repeat(reverse: true))
+          .scale(begin: const Offset(1, 1), end: const Offset(1.3, 1.3), duration: 7.seconds)
+          .move(begin: Offset.zero, end: const Offset(20, -20), duration: 5.seconds),
+        ),
+        // Orb 3: Center/Top - Soft Pink (Highlight)
+        Align(
+          alignment: const Alignment(0, -0.3),
+          child: _buildOrb(300, kColorSoftPink.withOpacity(0.3))
+          .animate(onPlay: (c) => c.repeat(reverse: true))
+          .scale(begin: const Offset(0.8, 0.8), end: const Offset(1.1, 1.1), duration: 5.seconds)
+          .fadeIn(),
+        ),
+        // Overlay: A very subtle blur to blend edges, but NOT wash out colors
+        Positioned.fill(
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 40, sigmaY: 40),
+            child: Container(color: Colors.transparent),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildOrb(double size, Color color) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: RadialGradient(
+          colors: [
+            color,
+            color.withOpacity(0),
+          ],
+          stops: const [0.4, 1.0], // Harder center, faded edge
+        ),
+      ),
+    );
+  }
+}
+
+// ==========================================
+//      REST OF THE APP (Existing Code)
+// ==========================================
 
 // --- UPDATER SERVICE ---
 class UpdaterService {
   static const String _releaseUrl =
   "https://api.github.com/repos/minhmc2007/AniCli-Flutter/releases/latest";
 
-static String? _extractSemVer(String raw) {
-  final RegExp regExp = RegExp(r'(\d+)\.(\d+)(\.(\d+))?');
-  final match = regExp.firstMatch(raw);
-  if (match != null) {
-    String major = match.group(1) ?? "0";
-    String minor = match.group(2) ?? "0";
-    String patch = match.group(4) ?? "0";
-    return "$major.$minor.$patch";
-  }
-  return null;
-}
+                      static String? _extractSemVer(String raw) {
+                        final RegExp regExp = RegExp(r'(\d+)\.(\d+)(\.(\d+))?');
+                        final match = regExp.firstMatch(raw);
+                        if (match != null) {
+                          String major = match.group(1) ?? "0";
+                          String minor = match.group(2) ?? "0";
+                          String patch = match.group(4) ?? "0";
+                          return "$major.$minor.$patch";
+                        }
+                        return null;
+                      }
 
-static bool _isNewer(String current, String remote) {
-  try {
-    List<int> cParts = current.split('.').map(int.parse).toList();
-    List<int> rParts = remote.split('.').map(int.parse).toList();
+                      static bool _isNewer(String current, String remote) {
+                        try {
+                          List<int> cParts = current.split('.').map(int.parse).toList();
+                          List<int> rParts = remote.split('.').map(int.parse).toList();
 
-    for (int i = 0; i < 3; i++) {
-      int c = (i < cParts.length) ? cParts[i] : 0;
-      int r = (i < rParts.length) ? rParts[i] : 0;
-      if (r > c) return true;
-      if (r < c) return false;
-    }
-  } catch (e) {
-    debugPrint("Version parsing error: $e");
-  }
-  return false;
-}
+                          for (int i = 0; i < 3; i++) {
+                            int c = (i < cParts.length) ? cParts[i] : 0;
+                            int r = (i < rParts.length) ? rParts[i] : 0;
+                            if (r > c) return true;
+                            if (r < c) return false;
+                          }
+                        } catch (e) {
+                          debugPrint("Version parsing error: $e");
+                        }
+                        return false;
+                      }
 
-static Future<void> checkAndUpdate(BuildContext context) async {
-  try {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("Checking for updates...")));
+                      static Future<void> checkAndUpdate(BuildContext context) async {
+                        try {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text("Checking for updates...")));
 
-    final response = await http.get(Uri.parse(_releaseUrl));
-    if (response.statusCode == 200) {
-      final data = jsonDecode(response.body);
-      String remoteTag = data['tag_name'];
-      String body = data['body'];
-      List assets = data['assets'];
+                          final response = await http.get(Uri.parse(_releaseUrl));
+                          if (response.statusCode == 200) {
+                            final data = jsonDecode(response.body);
+                            String remoteTag = data['tag_name'];
+                            String body = data['body'];
+                            List assets = data['assets'];
 
-      String? cleanCurrent = _extractSemVer(kAppVersion);
-      String? cleanRemote = _extractSemVer(remoteTag);
+                            String? cleanCurrent = _extractSemVer(kAppVersion);
+                            String? cleanRemote = _extractSemVer(remoteTag);
 
-      if (cleanCurrent != null &&
-        cleanRemote != null &&
-        _isNewer(cleanCurrent, cleanRemote)) {
-        if (context.mounted) {
-          _showCozyUpdateDialog(context, remoteTag, body, assets);
-        }
-        } else {
-          if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-              content: Text("You are up to date! ($kAppVersion)"),
-              backgroundColor: Colors.green));
-          }
-        }
-    } else {
-      throw Exception("GitHub API returned ${response.statusCode}");
-    }
-  } catch (e) {
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text("Update check failed: $e"),
-        backgroundColor: kColorCoral));
-    }
-  }
-}
+                            if (cleanCurrent != null &&
+                              cleanRemote != null &&
+                              _isNewer(cleanCurrent, cleanRemote)) {
+                              if (context.mounted) {
+                                _showCozyUpdateDialog(context, remoteTag, body, assets);
+                              }
+                              } else {
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                                    content: Text("You are up to date! ($kAppVersion)"),
+                                    backgroundColor: Colors.green));
+                                }
+                              }
+                          } else {
+                            throw Exception("GitHub API returned ${response.statusCode}");
+                          }
+                        } catch (e) {
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                              content: Text("Update check failed: $e"),
+                              backgroundColor: kColorCoral));
+                          }
+                        }
+                      }
 
-static void _showCozyUpdateDialog(
-  BuildContext context, String version, String notes, List assets) {
-  showGeneralDialog(
-    context: context,
-    barrierDismissible: true,
-    barrierLabel: "Dismiss",
-    barrierColor: Colors.black.withOpacity(0.6),
-    pageBuilder: (ctx, anim1, anim2) {
-      return Center(
-        child: Material(
-          color: Colors.transparent,
-          child: Container(
-            width: MediaQuery.of(context).size.width * 0.85,
-            constraints: const BoxConstraints(maxWidth: 500, maxHeight: 600),
-            padding: const EdgeInsets.all(24),
-            // Solid White Background
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(25),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.3),
-                  blurRadius: 40,
-                  offset: const Offset(0, 20),
-                  spreadRadius: 5,
-                )
-              ],
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: kColorCoral.withOpacity(0.1),
-                        shape: BoxShape.circle),
-                        child: const Icon(LucideIcons.sparkles,
-                                          color: kColorCoral, size: 24),
-                    ),
-                    const SizedBox(width: 15),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text("New Version Available",
-                               style: GoogleFonts.inter(
-                                 fontSize: 18,
-                                 fontWeight: FontWeight.bold,
-                                 color: kColorDarkText)),
-                                 Text(version,
-                                      style: GoogleFonts.inter(
-                                        fontSize: 14,
-                                        color: kColorCoral,
-                                        fontWeight: FontWeight.bold)),
-                        ],
-                      ),
-                    ),
-                  ],
-                )
-                .animate()
-                .slideY(begin: -0.2, end: 0, duration: 400.ms)
-                .fadeIn(),
-                const SizedBox(height: 20),
-                Divider(color: Colors.grey.withOpacity(0.2)),
-                const SizedBox(height: 10),
-                Flexible(
-                  child: SingleChildScrollView(
-                    physics: const BouncingScrollPhysics(),
-                    child: MarkdownBody(
-                      data: notes,
-                      styleSheet: MarkdownStyleSheet(
-                        p: GoogleFonts.inter(
-                          color: kColorDarkText, fontSize: 14),
-                          h1: GoogleFonts.inter(
-                            color: kColorDarkText,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 20),
-                            h2: GoogleFonts.inter(
-                              color: kColorDarkText,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 18),
-                              h3: GoogleFonts.inter(
-                                color: kColorDarkText,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 16),
-                                listBullet: GoogleFonts.inter(color: kColorCoral),
-                                strong: GoogleFonts.inter(
-                                  fontWeight: FontWeight.bold, color: kColorCoral),
-                                  code: GoogleFonts.jetBrainsMono(
-                                    backgroundColor: Colors.grey.shade100,
-                                    color: kColorDarkText),
-                      ),
-                    ),
-                  ),
-                ).animate(delay: 200.ms).fadeIn().slideX(begin: 0.1, end: 0),
-                const SizedBox(height: 20),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(ctx),
-                      child: Text("Later",
-                                  style: GoogleFonts.inter(
-                                    color: Colors.black54,
-                                    fontWeight: FontWeight.w600)),
-                    ),
-                    const SizedBox(width: 10),
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: kColorCoral,
-                        foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(15)),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 20, vertical: 12),
-                              elevation: 0,
-                      ),
-                      onPressed: () {
-                        Navigator.pop(ctx);
-                        _performUpdate(context, assets, version);
-                      },
-                      icon: const Icon(LucideIcons.downloadCloud, size: 18),
-                      label: Text("Update Now",
-                                  style:
-                                  GoogleFonts.inter(fontWeight: FontWeight.bold)),
-                    ),
-                  ],
-                ).animate(delay: 400.ms).fadeIn().slideY(begin: 0.2, end: 0),
-              ],
-            ),
-          ),
-        ),
-      );
-    },
-    transitionBuilder: (ctx, anim1, anim2, child) {
-      return Transform.scale(
-        scale: Curves.easeOutBack.transform(anim1.value),
-        child: Opacity(
-          opacity: anim1.value,
-          child: child,
-        ),
-      );
-    },
-    transitionDuration: const Duration(milliseconds: 400),
-  );
-  }
+                      static void _showCozyUpdateDialog(
+                        BuildContext context, String version, String notes, List assets) {
+                        showGeneralDialog(
+                          context: context,
+                          barrierDismissible: true,
+                          barrierLabel: "Dismiss",
+                          barrierColor: Colors.black.withOpacity(0.6),
+                          pageBuilder: (ctx, anim1, anim2) {
+                            return Center(
+                              child: Material(
+                                color: Colors.transparent,
+                                child: Container(
+                                  width: MediaQuery.of(context).size.width * 0.85,
+                                  constraints: const BoxConstraints(maxWidth: 500, maxHeight: 600),
+                                  padding: const EdgeInsets.all(24),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(25),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withOpacity(0.3),
+                                        blurRadius: 40,
+                                        offset: const Offset(0, 20),
+                                        spreadRadius: 5,
+                                      )
+                                    ],
+                                  ),
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Container(
+                                            padding: const EdgeInsets.all(10),
+                                            decoration: BoxDecoration(
+                                              color: kColorCoral.withOpacity(0.1),
+                                              shape: BoxShape.circle),
+                                              child: const Icon(LucideIcons.sparkles,
+                                                                color: kColorCoral, size: 24),
+                                          ),
+                                          const SizedBox(width: 15),
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                Text("New Version Available",
+                                                     style: GoogleFonts.inter(
+                                                       fontSize: 18,
+                                                       fontWeight: FontWeight.bold,
+                                                       color: kColorDarkText)),
+                                                       Text(version,
+                                                            style: GoogleFonts.inter(
+                                                              fontSize: 14,
+                                                              color: kColorCoral,
+                                                              fontWeight: FontWeight.bold)),
+                                              ],
+                                            ),
+                                          ),
+                                        ],
+                                      )
+                                      .animate()
+                                      .slideY(begin: -0.2, end: 0, duration: 400.ms)
+                                      .fadeIn(),
+                                      const SizedBox(height: 20),
+                                      Divider(color: Colors.grey.withOpacity(0.2)),
+                                      const SizedBox(height: 10),
+                                      Flexible(
+                                        child: SingleChildScrollView(
+                                          physics: const BouncingScrollPhysics(),
+                                          child: MarkdownBody(
+                                            data: notes,
+                                            styleSheet: MarkdownStyleSheet(
+                                              p: GoogleFonts.inter(
+                                                color: kColorDarkText, fontSize: 14),
+                                                h1: GoogleFonts.inter(
+                                                  color: kColorDarkText,
+                                                  fontWeight: FontWeight.bold,
+                                                  fontSize: 20),
+                                                  h2: GoogleFonts.inter(
+                                                    color: kColorDarkText,
+                                                    fontWeight: FontWeight.bold,
+                                                    fontSize: 18),
+                                                    h3: GoogleFonts.inter(
+                                                      color: kColorDarkText,
+                                                      fontWeight: FontWeight.bold,
+                                                      fontSize: 16),
+                                                      listBullet: GoogleFonts.inter(color: kColorCoral),
+                                                      strong: GoogleFonts.inter(
+                                                        fontWeight: FontWeight.bold, color: kColorCoral),
+                                                        code: GoogleFonts.jetBrainsMono(
+                                                          backgroundColor: Colors.grey.shade100,
+                                                          color: kColorDarkText),
+                                            ),
+                                          ),
+                                        ),
+                                      ).animate(delay: 200.ms).fadeIn().slideX(begin: 0.1, end: 0),
+                                      const SizedBox(height: 20),
+                                      Row(
+                                        mainAxisAlignment: MainAxisAlignment.end,
+                                        children: [
+                                          TextButton(
+                                            onPressed: () => Navigator.pop(ctx),
+                                            child: Text("Later",
+                                                        style: GoogleFonts.inter(
+                                                          color: Colors.black54,
+                                                          fontWeight: FontWeight.w600)),
+                                          ),
+                                          const SizedBox(width: 10),
+                                          ElevatedButton.icon(
+                                            style: ElevatedButton.styleFrom(
+                                              backgroundColor: kColorCoral,
+                                              foregroundColor: Colors.white,
+                                                shape: RoundedRectangleBorder(
+                                                  borderRadius: BorderRadius.circular(15)),
+                                                  padding: const EdgeInsets.symmetric(
+                                                    horizontal: 20, vertical: 12),
+                                                    elevation: 0,
+                                            ),
+                                            onPressed: () {
+                                              Navigator.pop(ctx);
+                                              _performUpdate(context, assets, version);
+                                            },
+                                            icon: const Icon(LucideIcons.downloadCloud, size: 18),
+                                            label: Text("Update Now",
+                                                        style:
+                                                        GoogleFonts.inter(fontWeight: FontWeight.bold)),
+                                          ),
+                                        ],
+                                      ).animate(delay: 400.ms).fadeIn().slideY(begin: 0.2, end: 0),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                          transitionBuilder: (ctx, anim1, anim2, child) {
+                            return Transform.scale(
+                              scale: Curves.easeOutBack.transform(anim1.value),
+                              child: Opacity(
+                                opacity: anim1.value,
+                                child: child,
+                              ),
+                            );
+                          },
+                          transitionDuration: const Duration(milliseconds: 400),
+                        );
+                        }
 
-  static Future<void> _performUpdate(
-    BuildContext context, List assets, String version) async {
-      String? downloadUrl;
-      String fileName = "";
+                        static Future<void> _performUpdate(
+                          BuildContext context, List assets, String version) async {
+                            String? downloadUrl;
+                            String fileName = "";
 
-      // --- CHECK PERMISSIONS ON ANDROID ---
-      if (Platform.isAndroid) {
-        var status = await Permission.storage.status;
-        if (!status.isGranted) {
-          await Permission.storage.request();
-        }
+                            if (Platform.isAndroid) {
+                              var status = await Permission.storage.status;
+                              if (!status.isGranted) {
+                                await Permission.storage.request();
+                              }
 
-        var installStatus = await Permission.requestInstallPackages.status;
-        if (!installStatus.isGranted) {
-          installStatus = await Permission.requestInstallPackages.request();
-          if (!installStatus.isGranted) {
-            if (context.mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                content: Text(
-                  "Permission denied. Cannot install updates without 'Install Unknown Apps' permission.")));
-            }
-            return;
-          }
-        }
+                              var installStatus = await Permission.requestInstallPackages.status;
+                              if (!installStatus.isGranted) {
+                                installStatus = await Permission.requestInstallPackages.request();
+                                if (!installStatus.isGranted) {
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                                      content: Text(
+                                        "Permission denied. Cannot install updates without 'Install Unknown Apps' permission.")));
+                                  }
+                                  return;
+                                }
+                              }
 
-        final asset = assets.firstWhere(
-          (a) => a['name'].toString().endsWith('.apk'),
-          orElse: () => null);
-        downloadUrl = asset?['browser_download_url'];
-        fileName = "AniCli_$version.apk";
-      } else if (Platform.isWindows) {
-        final asset = assets.firstWhere(
-          (a) =>
-          a['name'].toString().endsWith('.zip') ||
-          a['name'].toString().endsWith('.exe'),
-          orElse: () => null);
-        downloadUrl = asset?['browser_download_url'];
-        fileName = "AniCli_$version.zip";
-      } else if (Platform.isLinux) {
-        final asset = assets.firstWhere(
-          (a) =>
-          a['name'].toString().endsWith('.tar.gz') ||
-          a['name'].toString().endsWith('.AppImage'),
-          orElse: () => null);
-        downloadUrl = asset?['browser_download_url'];
-        fileName = "AniCli_$version.tar.gz";
-      } else {
-        launchUrl(
-          Uri.parse(
-            "https://github.com/minhmc2007/AniCli-Flutter/releases/latest"),
-            mode: LaunchMode.externalApplication);
-        return;
-      }
+                              final asset = assets.firstWhere(
+                                (a) => a['name'].toString().endsWith('.apk'),
+                                orElse: () => null);
+                              downloadUrl = asset?['browser_download_url'];
+                              fileName = "AniCli_$version.apk";
+                            } else if (Platform.isWindows) {
+                              final asset = assets.firstWhere(
+                                (a) =>
+                                a['name'].toString().endsWith('.zip') ||
+                                a['name'].toString().endsWith('.exe'),
+                                orElse: () => null);
+                              downloadUrl = asset?['browser_download_url'];
+                              fileName = "AniCli_$version.zip";
+                            } else if (Platform.isLinux) {
+                              final asset = assets.firstWhere(
+                                (a) =>
+                                a['name'].toString().endsWith('.tar.gz') ||
+                                a['name'].toString().endsWith('.AppImage'),
+                                orElse: () => null);
+                              downloadUrl = asset?['browser_download_url'];
+                              fileName = "AniCli_$version.tar.gz";
+                            } else {
+                              launchUrl(
+                                Uri.parse(
+                                  "https://github.com/minhmc2007/AniCli-Flutter/releases/latest"),
+                                  mode: LaunchMode.externalApplication);
+                              return;
+                            }
 
-      if (downloadUrl == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("No compatible asset found.")));
-        return;
-      }
+                            if (downloadUrl == null) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text("No compatible asset found.")));
+                              return;
+                            }
 
-      // --- SHOW DOWNLOAD PROGRESS DIALOG ---
-      if (!context.mounted) return;
+                            if (!context.mounted) return;
 
-      final File? downloadedFile = await showDialog<File?>(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => UpdateDownloadingDialog(
-          downloadUrl: downloadUrl!,
-          fileName: fileName,
-        ),
-      );
+                            final File? downloadedFile = await showDialog<File?>(
+                              context: context,
+                              barrierDismissible: false,
+                              builder: (context) => UpdateDownloadingDialog(
+                                downloadUrl: downloadUrl!,
+                                fileName: fileName,
+                              ),
+                            );
 
-      if (downloadedFile != null) {
-        // Installation Logic
-        if (Platform.isAndroid) {
-          final result = await OpenFile.open(downloadedFile.path,
-                                             type: "application/vnd.android.package-archive");
+                            if (downloadedFile != null) {
+                              if (Platform.isAndroid) {
+                                final result = await OpenFile.open(downloadedFile.path,
+                                                                   type: "application/vnd.android.package-archive");
 
-          if (result.type != ResultType.done) {
-            if (context.mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text("Install Error: ${result.message}")));
-            }
-          }
-        } else {
-          if (Platform.isWindows || Platform.isLinux) {
-            await launchUrl(Uri.directory(downloadedFile.parent.path));
-            if (context.mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                content:
-                Text("Update downloaded. Please extract/install manually."),
-                duration: Duration(seconds: 5)));
-            }
-          }
-        }
-      }
-    }
+                                if (result.type != ResultType.done) {
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text("Install Error: ${result.message}")));
+                                  }
+                                }
+                              } else {
+                                if (Platform.isWindows || Platform.isLinux) {
+                                  await launchUrl(Uri.directory(downloadedFile.parent.path));
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                                      content:
+                                      Text("Update downloaded. Please extract/install manually."),
+                                      duration: Duration(seconds: 5)));
+                                  }
+                                }
+                              }
+                            }
+                          }
 }
 
 // --- SMOOTH DOWNLOAD DIALOG (SOLID WHITE) ---
@@ -472,7 +801,6 @@ class _UpdateDownloadingDialogState extends State<UpdateDownloadingDialog> {
       child: Center(
         child: Material(
           color: Colors.transparent,
-          // Solid White Container
           child: Container(
             width: MediaQuery.of(context).size.width * 0.85,
             constraints: const BoxConstraints(maxWidth: 400),
@@ -523,7 +851,6 @@ class _UpdateDownloadingDialogState extends State<UpdateDownloadingDialog> {
                             style:
                             GoogleFonts.inter(fontSize: 14, color: Colors.black54)),
                             const SizedBox(height: 20),
-                            // Smooth Progress Bar
                             TweenAnimationBuilder<double>(
                               tween: Tween<double>(begin: 0, end: _progress),
                               duration: const Duration(milliseconds: 200),
@@ -536,9 +863,9 @@ class _UpdateDownloadingDialogState extends State<UpdateDownloadingDialog> {
                                       child: LinearProgressIndicator(
                                         value: value,
                                         backgroundColor: Colors.grey.shade200,
-                                        valueColor: const AlwaysStoppedAnimation<Color>(
-                                          kColorCoral),
-                                          minHeight: 8,
+                                        valueColor:
+                                        const AlwaysStoppedAnimation<Color>(kColorCoral),
+                                        minHeight: 8,
                                       ),
                                     ),
                                     const SizedBox(height: 10),
@@ -569,7 +896,7 @@ class _UpdateDownloadingDialogState extends State<UpdateDownloadingDialog> {
                                   foregroundColor: kColorCoral,
                               ),
                               onPressed: () {
-                                _client.close(); // Cancel download
+                                _client.close();
                                 Navigator.pop(context, null);
                               },
                               child: const Text("Cancel"),
@@ -584,7 +911,6 @@ class _UpdateDownloadingDialogState extends State<UpdateDownloadingDialog> {
   }
 }
 
-// --- NEW EPISODE DOWNLOAD DIALOG ---
 class EpisodeDownloadDialog extends StatefulWidget {
   final String url;
   final String fileName;
@@ -623,14 +949,12 @@ class _EpisodeDownloadDialogState extends State<EpisodeDownloadDialog> {
       if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
         dir = await getDownloadsDirectory();
       }
-      // Fallback
       dir ??= await getApplicationDocumentsDirectory();
 
       String savePath = "${dir.path}/${widget.fileName}";
 
       final file = File(savePath);
       final request = http.Request('GET', Uri.parse(widget.url));
-      // Add Referer if needed for anime streams
       request.headers['Referer'] = AniCore.referer;
 
       final response = await _client.send(request);
@@ -699,7 +1023,6 @@ class _EpisodeDownloadDialogState extends State<EpisodeDownloadDialog> {
       child: Center(
         child: Material(
           color: Colors.transparent,
-          // Solid White Container
           child: Container(
             width: MediaQuery.of(context).size.width * 0.85,
             constraints: const BoxConstraints(maxWidth: 400),
@@ -756,7 +1079,6 @@ class _EpisodeDownloadDialogState extends State<EpisodeDownloadDialog> {
                                  style:
                                  GoogleFonts.inter(fontSize: 14, color: kColorDarkText)),
                                  const SizedBox(height: 20),
-                                 // Smooth Progress Bar
                                  TweenAnimationBuilder<double>(
                                    tween: Tween<double>(begin: 0, end: _progress),
                                    duration: const Duration(milliseconds: 200),
@@ -769,9 +1091,9 @@ class _EpisodeDownloadDialogState extends State<EpisodeDownloadDialog> {
                                            child: LinearProgressIndicator(
                                              value: value > 0 ? value : null,
                                              backgroundColor: Colors.grey.shade200,
-                                             valueColor: const AlwaysStoppedAnimation<Color>(
-                                               kColorCoral),
-                                               minHeight: 8,
+                                             valueColor:
+                                             const AlwaysStoppedAnimation<Color>(kColorCoral),
+                                             minHeight: 8,
                                            ),
                                          ),
                                          const SizedBox(height: 10),
@@ -802,7 +1124,7 @@ class _EpisodeDownloadDialogState extends State<EpisodeDownloadDialog> {
                                   foregroundColor: kColorCoral,
                               ),
                               onPressed: () {
-                                _client.close(); // Cancel download
+                                _client.close();
                                 Navigator.pop(context);
                               },
                               child: const Text("Cancel"),
@@ -852,38 +1174,6 @@ class SettingsProvider extends ChangeNotifier {
   void toggleInternalPlayer(bool value) {
     _useInternalPlayer = value;
     notifyListeners();
-  }
-}
-
-class AniCliApp extends StatelessWidget {
-  const AniCliApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'AniCli Flutter',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        brightness: Brightness.light,
-        scaffoldBackgroundColor: kColorCream,
-        textTheme: GoogleFonts.interTextTheme(ThemeData.light().textTheme).apply(
-          bodyColor: kColorDarkText,
-          displayColor: kColorDarkText,
-        ),
-        useMaterial3: true,
-        iconTheme: const IconThemeData(color: kColorDarkText),
-        pageTransitionsTheme: const PageTransitionsTheme(
-          builders: {
-            TargetPlatform.android: ZoomPageTransitionsBuilder(),
-            TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
-            TargetPlatform.windows: ZoomPageTransitionsBuilder(),
-            TargetPlatform.linux: ZoomPageTransitionsBuilder(),
-            TargetPlatform.macOS: ZoomPageTransitionsBuilder(),
-          },
-        ),
-      ),
-      home: const MainScreen(),
-    );
   }
 }
 
@@ -2147,6 +2437,27 @@ class _SettingsViewState extends State<SettingsView> {
           trailing:
           const Icon(LucideIcons.externalLink, size: 16, color: kColorCoral),
           onTap: () => _launchUrl(_githubUrl),
+        ),
+        const SizedBox(height: 10),
+        // --- ADD THIS BUTTON ---
+        _buildSettingCard(
+          icon: LucideIcons.rotateCcw,
+          title: "Reset Welcome Screen",
+          subtitle: "Reset OOBE flag for testing",
+          onTap: () async {
+            final prefs = await SharedPreferences.getInstance();
+            // Remove the flag so next launch counts as "first"
+            await prefs.remove('is_first_launch');
+
+            if (context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text("Reset! Restart the app to see the Welcome Screen."),
+                  backgroundColor: kColorCoral,
+                ),
+              );
+            }
+          },
         ),
 
         const SizedBox(height: 30),
