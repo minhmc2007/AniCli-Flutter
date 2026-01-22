@@ -108,8 +108,6 @@ static Future<Map<String, dynamic>> _post(String query, Map<String, dynamic> var
 }
 
 static String _decryptSource(String input) {
-  // [Keep your existing decryption logic here, omitted for brevity but ensure it is present]
-  // Copy the map and loop from the previous file or your original code.
   const Map<String, String> map = {
     "01": "9", "08": "0", "09": "1", "0a": "2", "0b": "3", "0c": "4", "0d": "5", "0e": "6", "0f": "7", "00": "8",
     "50": "h", "51": "i", "52": "j", "53": "k", "54": "l", "55": "m", "56": "n", "57": "o", "58": "p", "59": "a",
@@ -132,40 +130,36 @@ static String _decryptSource(String input) {
 }
 }
 
-// --- MANGA CORE (FIXED) ---
+// --- MANGA CORE (MangaDex API) ---
 class MangaCore {
   static const String baseUrl = "https://api.mangadex.org";
 
-  // Define a specific User-Agent for MangaDex (Required to avoid 403/400 errors)
+  // Necessary header to avoid 403 Forbidden
   static const Map<String, String> _headers = {
-    "User-Agent": "AniCli-Flutter/1.8.0",
+    "User-Agent": "AniCli-Flutter/2.0.0",
   };
 
   static Future<List<AnimeModel>> search(String query) async {
     final isTrending = query.isEmpty;
-
-    // Using Uri.https ensures params like `contentRating[]` are encoded correctly
     final uri = Uri.https("api.mangadex.org", "/manga", {
       "limit": "20",
       "offset": "0",
-      "title": isTrending ? null : query, // Null values are automatically removed by Uri.https
+      "title": isTrending ? null : query,
       "order[followedCount]": "desc",
       "includes[]": "cover_art",
+      // Ensure R18 content is searchable
       "contentRating[]": ["safe", "suggestive", "erotica", "pornographic"]
     });
 
     try {
       final response = await http.get(uri, headers: _headers);
-
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final List results = data['data'];
         return results.map((e) => AnimeModel.fromMangaDex(e)).toList();
-      } else {
-        print("MangaDex Error: ${response.statusCode} - ${response.body}");
       }
     } catch (e) {
-      print("Manga Search Exception: $e");
+      print("Manga Search Error: $e");
     }
     return [];
   }
@@ -173,33 +167,57 @@ class MangaCore {
   static Future<List<AnimeModel>> getTrending() async => search("");
 
   static Future<List<String>> getChapters(String mangaId) async {
-    final uri = Uri.https("api.mangadex.org", "/manga/$mangaId/feed", {
-      "limit": "500",
-      "order[chapter]": "desc",
-      "translatedLanguage[]": "en",
-      "contentRating[]": ["safe", "suggestive", "erotica", "pornographic"]
-    });
+    // 1. Helper to fetch chapters
+    Future<List<dynamic>> fetch(List<String>? langs) async {
+      final Map<String, dynamic> queryParams = {
+        "limit": "500", // Max limit
+        "order[chapter]": "desc",
+        // CRITICAL: Must include R18 ratings or they won't show up in feed
+        "contentRating[]": ["safe", "suggestive", "erotica", "pornographic"]
+      };
 
-    try {
-      final response = await http.get(uri, headers: _headers);
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        final List chapters = data['data'];
-
-        return chapters.map((c) {
-          final String id = c['id'];
-          final String num = c['attributes']['chapter'] ?? "Oneshot";
-          return "$id|$num";
-        }).toList();
+      if (langs != null) {
+        queryParams["translatedLanguage[]"] = langs;
       }
-    } catch (e) {
-      print("Get Chapters Error: $e");
+
+      final uri = Uri.https("api.mangadex.org", "/manga/$mangaId/feed", queryParams);
+      final res = await http.get(uri, headers: _headers);
+
+      if (res.statusCode == 200) {
+        return jsonDecode(res.body)['data'];
+      }
+      return [];
     }
-    return [];
+
+    // 2. Logic: Try English first
+    var chapters = await fetch(['en']);
+
+    // 3. Fallback: If no English chapters (e.g. licensed/removed), try ALL languages
+    if (chapters.isEmpty) {
+      chapters = await fetch(null);
+    }
+
+    // 4. Process and Filter
+    List<String> results = [];
+    for (var c in chapters) {
+      final attr = c['attributes'];
+
+      // Skip external links (MangaPlus etc) that break the reader
+      if (attr['externalUrl'] != null) continue;
+
+      final String id = c['id'];
+      final String num = attr['chapter'] ?? "Oneshot";
+      final String lang = attr['translatedLanguage'] ?? "??";
+
+      // Format: ID | ChapterNum [Lang]
+      results.add("$id|$num [$lang]");
+    }
+
+    return results;
   }
 
   static Future<List<String>> getPages(String chapterId) async {
+    // Handle "id|num [lang]" format
     final realId = chapterId.contains("|") ? chapterId.split("|")[0] : chapterId;
 
     try {
@@ -264,9 +282,9 @@ class AnimeModel {
 
     String title = "Unknown";
     if (attr['title'] != null) {
-      // Handle map title safely
       if (attr['title'] is Map) {
         final Map t = attr['title'];
+        // Prefer English title, fallback to any available
         title = t['en'] ?? (t.isNotEmpty ? t.values.first : "Unknown");
       }
     }
