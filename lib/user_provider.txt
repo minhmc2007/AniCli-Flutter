@@ -18,16 +18,10 @@ class HistoryItem {
 
   factory HistoryItem.fromJson(Map<String, dynamic> json) {
     return HistoryItem(
-      anime: AnimeModel.fromJson(json['anime']), // This uses the updated AnimeModel
+      anime: AnimeModel.fromJson(json['anime']),
       episode: json['episode'],
       timestamp: DateTime.parse(json['timestamp']),
     );
-  }
-
-  // Helper for UI
-  String get displayEpisode {
-    if (episode.contains("|")) return episode.split("|")[1];
-    return episode;
   }
 }
 
@@ -45,12 +39,14 @@ class UserProvider extends ChangeNotifier {
   Future<void> _loadData() async {
     final prefs = await SharedPreferences.getInstance();
 
+    // Load Favs
     final favString = prefs.getString('favorites');
     if (favString != null) {
       final List decoded = jsonDecode(favString);
       _favorites = decoded.map((e) => AnimeModel.fromJson(e)).toList();
     }
 
+    // Load History
     final histString = prefs.getString('history');
     if (histString != null) {
       final List decoded = jsonDecode(histString);
@@ -67,6 +63,7 @@ class UserProvider extends ChangeNotifier {
       _favorites.add(anime);
     }
     notifyListeners();
+
     final prefs = await SharedPreferences.getInstance();
     prefs.setString('favorites', jsonEncode(_favorites.map((e) => e.toJson()).toList()));
   }
@@ -76,18 +73,26 @@ class UserProvider extends ChangeNotifier {
   }
 
   Future<void> addToHistory(AnimeModel anime, String episode) async {
+    // Remove existing entry for this anime so we can move it to the top
     _history.removeWhere((e) => e.anime.id == anime.id);
+
+    // Add to top
     _history.insert(0, HistoryItem(
       anime: anime,
       episode: episode,
       timestamp: DateTime.now()
     ));
+
+    // Limit history to 50 items
     if (_history.length > 50) _history.removeLast();
+
     notifyListeners();
+
     final prefs = await SharedPreferences.getInstance();
     prefs.setString('history', jsonEncode(_history.map((e) => e.toJson()).toList()));
   }
 
+  // Clean history
   Future<void> clearHistory() async {
     _history.clear();
     notifyListeners();
