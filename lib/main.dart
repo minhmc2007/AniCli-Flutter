@@ -10,12 +10,15 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:flutter_markdown/flutter_markdown.dart'; // Required for Changelog
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:open_file/open_file.dart'; // Required for installing APK
 import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart'; // Required for Android permissions
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -331,50 +334,507 @@ class FloatingOrbsBackground extends StatelessWidget {
 }
 
 // ==========================================
-//      SERVICES & PROVIDERS
+//      SERVICES & PROVIDERS (UPDATER RESTORED)
 // ==========================================
 
 class UpdaterService {
   static const String _releaseUrl = "https://api.github.com/repos/minhmc2007/AniCli-Flutter/releases/latest";
 
-  // Manual Check
+  static String? _extractSemVer(String raw) {
+    final RegExp regExp = RegExp(r'(\d+)\.(\d+)(\.(\d+))?');
+    final match = regExp.firstMatch(raw);
+    if (match != null) {
+      String major = match.group(1) ?? "0";
+      String minor = match.group(2) ?? "0";
+      String patch = match.group(4) ?? "0";
+      return "$major.$minor.$patch";
+    }
+    return null;
+  }
+
+  static bool _isNewer(String current, String remote) {
+    try {
+      List<int> cParts = current.split('.').map(int.parse).toList();
+      List<int> rParts = remote.split('.').map(int.parse).toList();
+
+      for (int i = 0; i < 3; i++) {
+        int c = (i < cParts.length) ? cParts[i] : 0;
+        int r = (i < rParts.length) ? rParts[i] : 0;
+        if (r > c) return true;
+        if (r < c) return false;
+      }
+    } catch (e) {
+      debugPrint("Version parsing error: $e");
+    }
+    return false;
+  }
+
   static Future<void> checkAndUpdate(BuildContext context) async {
     try {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Checking for updates...")));
+
       final response = await http.get(Uri.parse(_releaseUrl));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("Latest: ${data['tag_name']}"), backgroundColor: Colors.green));
+        String remoteTag = data['tag_name'];
+        String body = data['body'];
+        List assets = data['assets'];
+
+        String? cleanCurrent = _extractSemVer(kAppVersion);
+        String? cleanRemote = _extractSemVer(remoteTag);
+
+        if (cleanCurrent != null && cleanRemote != null && _isNewer(cleanCurrent, cleanRemote)) {
+          if (context.mounted) {
+            _showCozyUpdateDialog(context, remoteTag, body, assets);
+          }
+        } else {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text("You are up to date! ($kAppVersion)"), backgroundColor: Colors.green));
+          }
         }
+      } else {
+        throw Exception("GitHub API returned ${response.statusCode}");
       }
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Update check failed: $e"), backgroundColor: kColorCoral));
+        ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text("Update check failed: $e"), backgroundColor: kColorCoral));
       }
     }
   }
 
-  // Silent Background Check
+  // Silent check for startup
   static Future<void> checkSilent(BuildContext context) async {
     try {
       final response = await http.get(Uri.parse(_releaseUrl));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        final String tag = data['tag_name'];
-        if (tag != "v$kAppVersion" && context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text("New Update Available: $tag"),
+        String remoteTag = data['tag_name'];
+        String body = data['body'];
+        List assets = data['assets'];
+
+        String? cleanCurrent = _extractSemVer(kAppVersion);
+        String? cleanRemote = _extractSemVer(remoteTag);
+
+        if (cleanCurrent != null && cleanRemote != null && _isNewer(cleanCurrent, cleanRemote)) {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text("New Update Available: $remoteTag"),
               backgroundColor: kColorCoral,
-              action: SnackBarAction(label: "View", textColor: Colors.white, onPressed: () => launchUrl(Uri.parse("https://github.com/minhmc2007/AniCli-Flutter/releases"))),
-            )
-          );
+              duration: const Duration(seconds: 10),
+              action: SnackBarAction(
+                label: "View",
+                textColor: Colors.white,
+                // THIS NOW OPENS THE INTERNAL DIALOG
+                onPressed: () => _showCozyUpdateDialog(context, remoteTag, body, assets),
+              ),
+            ));
+          }
         }
       }
     } catch (_) {}
+  }
+
+  static void _showCozyUpdateDialog(BuildContext context, String version, String notes, List assets) {
+    showGeneralDialog(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: "Dismiss",
+      barrierColor: Colors.black.withOpacity(0.6),
+      pageBuilder: (ctx, anim1, anim2) {
+        return Center(
+          child: Material(
+            color: Colors.transparent,
+            child: Container(
+              width: MediaQuery.of(context).size.width * 0.85,
+              constraints: const BoxConstraints(maxWidth: 500, maxHeight: 600),
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(25),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.3),
+                    blurRadius: 40,
+                    offset: const Offset(0, 20),
+                    spreadRadius: 5,
+                  )
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(color: kColorCoral.withOpacity(0.1), shape: BoxShape.circle),
+                        child: const Icon(LucideIcons.sparkles, color: kColorCoral, size: 24),
+                      ),
+                      const SizedBox(width: 15),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text("New Version Available",
+                                 style: GoogleFonts.inter(
+                                   fontSize: 18, fontWeight: FontWeight.bold, color: kColorDarkText)),
+                                   Text(version,
+                                        style: GoogleFonts.inter(
+                                          fontSize: 14, color: kColorCoral, fontWeight: FontWeight.bold)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ).animate().slideY(begin: -0.2, end: 0, duration: 400.ms).fadeIn(),
+                  const SizedBox(height: 20),
+                  Divider(color: Colors.grey.withOpacity(0.2)),
+                  const SizedBox(height: 10),
+                  Flexible(
+                    child: SingleChildScrollView(
+                      physics: const BouncingScrollPhysics(),
+                      child: MarkdownBody(
+                        data: notes,
+                        styleSheet: MarkdownStyleSheet(
+                          p: GoogleFonts.inter(color: kColorDarkText, fontSize: 14),
+                          h1: GoogleFonts.inter(color: kColorDarkText, fontWeight: FontWeight.bold, fontSize: 20),
+                          h2: GoogleFonts.inter(color: kColorDarkText, fontWeight: FontWeight.bold, fontSize: 18),
+                          h3: GoogleFonts.inter(color: kColorDarkText, fontWeight: FontWeight.bold, fontSize: 16),
+                          listBullet: GoogleFonts.inter(color: kColorCoral),
+                          strong: GoogleFonts.inter(fontWeight: FontWeight.bold, color: kColorCoral),
+                          code: GoogleFonts.jetBrainsMono(backgroundColor: Colors.grey.shade100, color: kColorDarkText),
+                        ),
+                      ),
+                    ),
+                  ).animate(delay: 200.ms).fadeIn().slideX(begin: 0.1, end: 0),
+                  const SizedBox(height: 20),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        child: Text("Later",
+                                    style: GoogleFonts.inter(color: Colors.black54, fontWeight: FontWeight.w600)),
+                      ),
+                      const SizedBox(width: 10),
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: kColorCoral,
+                          foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                            elevation: 0,
+                        ),
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          _performUpdate(context, assets, version);
+                        },
+                        icon: const Icon(LucideIcons.downloadCloud, size: 18),
+                        label: Text("Update Now", style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
+                      ),
+                    ],
+                  ).animate(delay: 400.ms).fadeIn().slideY(begin: 0.2, end: 0),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+      transitionBuilder: (ctx, anim1, anim2, child) {
+        return Transform.scale(
+          scale: Curves.easeOutBack.transform(anim1.value),
+          child: Opacity(
+            opacity: anim1.value,
+            child: child,
+          ),
+        );
+      },
+      transitionDuration: const Duration(milliseconds: 400),
+    );
+  }
+
+  static Future<void> _performUpdate(BuildContext context, List assets, String version) async {
+    String? downloadUrl;
+    String fileName = "";
+
+    // Platform Specific Asset Matching
+    if (Platform.isAndroid) {
+      var status = await Permission.storage.status;
+      if (!status.isGranted) {
+        await Permission.storage.request();
+      }
+
+      var installStatus = await Permission.requestInstallPackages.status;
+      if (!installStatus.isGranted) {
+        installStatus = await Permission.requestInstallPackages.request();
+        if (!installStatus.isGranted) {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text("Permission denied. Cannot install updates without 'Install Unknown Apps' permission.")));
+          }
+          return;
+        }
+      }
+
+      final asset = assets.firstWhere((a) => a['name'].toString().endsWith('.apk'), orElse: () => null);
+      downloadUrl = asset?['browser_download_url'];
+      fileName = "AniCli_$version.apk";
+    } else if (Platform.isWindows) {
+      final asset = assets.firstWhere(
+        (a) => a['name'].toString().endsWith('.zip') || a['name'].toString().endsWith('.exe'),
+        orElse: () => null);
+      downloadUrl = asset?['browser_download_url'];
+      fileName = "AniCli_$version.zip";
+    } else if (Platform.isLinux) {
+      final asset = assets.firstWhere(
+        (a) => a['name'].toString().endsWith('.tar.gz') || a['name'].toString().endsWith('.AppImage'),
+        orElse: () => null);
+      downloadUrl = asset?['browser_download_url'];
+      fileName = "AniCli_$version.tar.gz";
+    } else {
+      // Fallback for macOS/Web
+      launchUrl(Uri.parse("https://github.com/minhmc2007/AniCli-Flutter/releases/latest"),
+      mode: LaunchMode.externalApplication);
+      return;
+    }
+
+    if (downloadUrl == null) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("No compatible asset found.")));
+      }
+      return;
+    }
+
+    if (!context.mounted) return;
+
+    // Show Custom Download Dialog
+    final File? downloadedFile = await showDialog<File?>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => UpdateDownloadingDialog(
+        downloadUrl: downloadUrl!,
+        fileName: fileName,
+      ),
+    );
+
+    if (downloadedFile != null) {
+      if (Platform.isAndroid) {
+        final result = await OpenFile.open(downloadedFile.path, type: "application/vnd.android.package-archive");
+
+        if (result.type != ResultType.done) {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Install Error: ${result.message}")));
+          }
+        }
+      } else {
+        if (Platform.isWindows || Platform.isLinux) {
+          // Open the directory so user can extract/run
+          await launchUrl(Uri.directory(downloadedFile.parent.path));
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text("Update downloaded. Please extract/install manually."), duration: Duration(seconds: 5)));
+          }
+        }
+      }
+    }
+  }
+}
+
+// --- SMOOTH DOWNLOAD DIALOG ---
+class UpdateDownloadingDialog extends StatefulWidget {
+  final String downloadUrl;
+  final String fileName;
+
+  const UpdateDownloadingDialog({
+    super.key,
+    required this.downloadUrl,
+    required this.fileName,
+  });
+
+  @override
+  State<UpdateDownloadingDialog> createState() => _UpdateDownloadingDialogState();
+}
+
+class _UpdateDownloadingDialogState extends State<UpdateDownloadingDialog> {
+  double _progress = 0.0;
+  String _status = "Initializing...";
+  String _sizeInfo = "";
+  final http.Client _client = http.Client();
+
+  @override
+  void initState() {
+    super.initState();
+    _startDownload();
+  }
+
+  @override
+  void dispose() {
+    _client.close();
+    super.dispose();
+  }
+
+  Future<void> _startDownload() async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      String savePath = "${dir.path}/${widget.fileName}";
+
+      if (Platform.isAndroid) {
+        final tempDir = await getExternalStorageDirectory();
+        if (tempDir != null) savePath = "${tempDir.path}/${widget.fileName}";
+      }
+
+      final file = File(savePath);
+      final request = http.Request('GET', Uri.parse(widget.downloadUrl));
+      final response = await _client.send(request);
+
+      if (response.statusCode != 200) {
+        throw Exception("Server responded with ${response.statusCode}");
+      }
+
+      final contentLength = response.contentLength ?? 0;
+      int received = 0;
+
+      final List<int> bytes = [];
+      response.stream.listen(
+        (List<int> newBytes) {
+          bytes.addAll(newBytes);
+          received += newBytes.length;
+          if (contentLength > 0) {
+            setState(() {
+              _progress = received / contentLength;
+              _status = "Downloading...";
+              _sizeInfo =
+              "${(received / 1024 / 1024).toStringAsFixed(1)} MB / ${(contentLength / 1024 / 1024).toStringAsFixed(1)} MB";
+            });
+          }
+        },
+        onDone: () async {
+          await file.writeAsBytes(bytes);
+          if (mounted) {
+            Navigator.pop(context, file);
+          }
+        },
+        onError: (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Download error: $e")));
+            Navigator.pop(context, null);
+          }
+        },
+        cancelOnError: true,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text("Download failed: $e"), backgroundColor: kColorCoral));
+        Navigator.pop(context, null);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: false,
+      child: Center(
+        child: Material(
+          color: Colors.transparent,
+          child: Container(
+            width: MediaQuery.of(context).size.width * 0.85,
+            constraints: const BoxConstraints(maxWidth: 400),
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(25),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.3),
+                  blurRadius: 30,
+                  offset: const Offset(0, 15),
+                )
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: kColorCoral.withOpacity(0.1),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(LucideIcons.download, color: kColorCoral, size: 32)
+                  .animate(onPlay: (c) => c.repeat())
+                  .shimmer(duration: 1500.ms, color: Colors.white)
+                  .scale(
+                    begin: const Offset(1, 1),
+                    end: const Offset(1.1, 1.1),
+                    duration: 1000.ms,
+                    curve: Curves.easeInOut)
+                  .then()
+                  .scale(
+                    begin: const Offset(1.1, 1.1),
+                    end: const Offset(1, 1),
+                    curve: Curves.easeInOut),
+                ),
+                const SizedBox(height: 20),
+                Text("Updating App",
+                     style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.bold, color: kColorDarkText)),
+                     const SizedBox(height: 5),
+                     Text(_status, style: GoogleFonts.inter(fontSize: 14, color: Colors.black54)),
+                     const SizedBox(height: 20),
+                     TweenAnimationBuilder<double>(
+                       tween: Tween<double>(begin: 0, end: _progress),
+                       duration: const Duration(milliseconds: 200),
+                       curve: Curves.easeInOut,
+                       builder: (context, value, _) {
+                         return Column(
+                           children: [
+                             ClipRRect(
+                               borderRadius: BorderRadius.circular(10),
+                               child: LinearProgressIndicator(
+                                 value: value,
+                                 backgroundColor: Colors.grey.shade200,
+                                 valueColor: const AlwaysStoppedAnimation<Color>(kColorCoral),
+                                 minHeight: 8,
+                               ),
+                             ),
+                             const SizedBox(height: 10),
+                             Row(
+                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                               children: [
+                                 Text("${(value * 100).toInt()}%",
+                                 style: GoogleFonts.jetBrainsMono(fontWeight: FontWeight.bold, color: kColorCoral)),
+                                 Text(_sizeInfo, style: GoogleFonts.inter(fontSize: 12, color: Colors.black45)),
+                               ],
+                             )
+                           ],
+                         );
+                       },
+                     ),
+                     const SizedBox(height: 25),
+                     SizedBox(
+                       width: double.infinity,
+                       child: OutlinedButton(
+                         style: OutlinedButton.styleFrom(
+                           side: const BorderSide(color: kColorCoral),
+                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                           foregroundColor: kColorCoral,
+                         ),
+                         onPressed: () {
+                           _client.close();
+                           Navigator.pop(context, null);
+                         },
+                         child: const Text("Cancel"),
+                       ),
+                     ),
+              ],
+            ),
+          ),
+        ),
+      ).animate().fadeIn().scale(curve: Curves.easeOutBack),
+    );
   }
 }
 
@@ -604,7 +1064,7 @@ class _MainScreenState extends State<MainScreen> {
   @override
   void initState() {
     super.initState();
-    // Check for updates silently on startup
+    // Check for updates silently on startup (using complex logic)
     UpdaterService.checkSilent(context);
   }
 
@@ -889,7 +1349,6 @@ class _InternalPlayerScreenState extends State<InternalPlayerScreen> {
     super.initState();
     player = Player(configuration: const PlayerConfiguration(vo: 'gpu'));
 
-    // REMOVED 'textStyle' from VideoControllerConfiguration (Fixed Error)
     controller = VideoController(player,
                                  configuration: const VideoControllerConfiguration(
                                    enableHardwareAcceleration: true,
