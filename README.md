@@ -5,14 +5,15 @@
 ![Windows](https://img.shields.io/badge/Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)
 ![macOS](https://img.shields.io/badge/macOS-000000?style=for-the-badge&logo=apple&logoColor=white)
 ![iOS](https://img.shields.io/badge/iOS-000000?style=for-the-badge&logo=ios&logoColor=white)
+![MangaDex](https://img.shields.io/badge/MangaDex-FF6740?style=for-the-badge&logo=manga&logoColor=white)
 ![License](https://img.shields.io/badge/License-GPLv3-blue.svg?style=for-the-badge)
 
 [![Build Application](https://github.com/minhmc2007/AniCli-Flutter/actions/workflows/main.yml/badge.svg?branch=main)](https://github.com/minhmc2007/AniCli-Flutter/actions/workflows/main.yml)
 
-> **The Cozy Anime Client.**
-> A beautiful, animated Flutter port of the [ani-cli](https://github.com/pystardust/ani-cli) shell script.
+> **The Cozy Anime & Manga Client.**
+> A beautiful, animated Flutter port of the [ani-cli](https://github.com/pystardust/ani-cli) shell script, now with Manga support.
 
-**Ani-Cli Flutter** combines the powerful scraping logic of the terminal-based `ani-cli` with a high-end, glassmorphic user interface. Designed with a "Cozy" aesthetic (Cream & Peach palette), it provides a seamless and ad-free anime watching experience on Desktop and Mobile.
+**Ani-Cli Flutter** combines the powerful scraping logic of the terminal-based `ani-cli` with a high-end, glassmorphic user interface. Designed with a "Cozy" aesthetic (Cream & Peach palette), it provides a seamless and ad-free experience for watching Anime and reading Manga on Desktop and Mobile.
 
 ---
 
@@ -20,25 +21,26 @@
 
 *   **🎨 Cozy UI**: A relaxing, pastel-themed interface with live moving gradients and milky glassmorphism.
 *   **🚀 High Performance**: Built with Flutter for native performance on Linux, Windows, macOS, and iOS.
-*   **🎞️ Dual Player Support**:
-    *   **Built-in MPV**: Ready to use out of the box.
+*   **📖 Manga Reader**: Integrated **MangaDex API** support allows you to search and read your favorite manga directly within the app.
+*   **🎞️ Flexible Player Support**:
+    *   **Internal Player**: No external dependencies required! Just enable it in `Settings > General > Use internal player` to watch immediately.
     *   **System MPV**: Connects to your local MPV installation for maximum hardware acceleration and custom configuration.
-*   **❤️ Favorites**: Save your favorite shows for quick access.
-*   **clock History**: Automatically tracks watched episodes and saves your progress locally.
-*   **🔍 Powerful Search**: Scrapes `AllAnime` API for a vast library of Sub and Dub anime.
+*   **❤️ Favorites**: Save your favorite anime and manga for quick access.
+*   **clock History**: Automatically tracks watched episodes / read chapters and saves your progress locally.
+*   **🔍 Powerful Search**: Scrapes `AllAnime` API for a vast library of Sub/Dub anime and `MangaDex` for manga.
 *   **✨ Animations**: Smooth Hero transitions, staggered list animations, and hover effects using `flutter_animate`.
 
 ---
 
 ## 🛠️ Prerequisites
 
-**Note on Video Players:**
-This app comes with a **Built-in MPV** player, so you can run it immediately without external dependencies.
+**Good News:**
+This app does **not** require any external installation to run. It comes with a default internal player.
 
-**However, the developer strongly recommends using System MPV.**
-Switching to the System MPV (via settings) provides the best experience, including better hardware acceleration, higher format compatibility, and lower resource usage.
+**Optional: System MPV**
+If you prefer using the system-level MPV player (for advanced config or specific hardware acceleration needs), you can toggle this in the settings.
 
-If you wish to use the System Player, please install `mpv`:
+If you wish to use the **System Player**, please ensure `mpv` is installed:
 
 ### Linux (Arch/Manjaro)
 ```bash
@@ -113,7 +115,8 @@ The binary will be located in `build/linux/x64/release/bundle/`.
 
 This project follows a clean separation of concerns:
 
-*   **`lib/api/ani_core.dart`**: The "Brain". Contains the port of the Bash script logic. Handles GraphQL queries, decryption of source links, and managing player processes.
+*   **`lib/api/ani_core.dart`**: The Anime Brain. Contains the port of the Bash script logic and AllAnime GraphQL queries.
+*   **`lib/api/manga_core.dart`**: The Manga Brain. Handles communication with the MangaDex API.
 *   **`lib/user_provider.dart`**: State Management. Uses `Provider` and `SharedPreferences` to handle History, Favorites, and Player settings persistence.
 *   **`lib/main.dart`**: The UI. Contains the `LiveGradientBackground`, `GlassDock`, and all visual views.
 
@@ -140,5 +143,6 @@ This project is licensed under the **GPLv3 License**, effectively inheriting the
 ## 🙏 Credits
 
 *   Based on the [ani-cli](https://github.com/pystardust/ani-cli) project by pystardust.
+*   Manga data provided by [MangaDex](https://mangadex.org).
 *   Specific logic adapted from the [minhmc2007/ani-cli](https://github.com/minhmc2007/ani-cli) fork.
 *   Built with [Flutter](https://flutter.dev).
