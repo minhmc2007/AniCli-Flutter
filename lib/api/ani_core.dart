@@ -130,24 +130,23 @@ static String _decryptSource(String input) {
 }
 }
 
-// --- MANGA CORE (MangaDex API) ---
+// --- MANGA CORE (MangaDex API - FIXED FOR R18) ---
 class MangaCore {
   static const String baseUrl = "https://api.mangadex.org";
 
-  // Necessary header to avoid 403 Forbidden
   static const Map<String, String> _headers = {
-    "User-Agent": "AniCli-Flutter/2.0.0",
+    "User-Agent": "AniCli-Flutter/2.3.0",
   };
 
   static Future<List<AnimeModel>> search(String query) async {
     final isTrending = query.isEmpty;
+    // For search, Uri.https usually works fine, but we repeat 'contentRating[]' to be safe
     final uri = Uri.https("api.mangadex.org", "/manga", {
       "limit": "20",
       "offset": "0",
       "title": isTrending ? null : query,
       "order[followedCount]": "desc",
       "includes[]": "cover_art",
-      // Ensure R18 content is searchable
       "contentRating[]": ["safe", "suggestive", "erotica", "pornographic"]
     });
 
@@ -167,49 +166,58 @@ class MangaCore {
   static Future<List<AnimeModel>> getTrending() async => search("");
 
   static Future<List<String>> getChapters(String mangaId) async {
-    // 1. Helper to fetch chapters
+    // Helper to manually build query string because Uri.https can sometimes mangle array params
+    // especially when dealing with specific R18 ratings that API is strict about.
     Future<List<dynamic>> fetch(List<String>? langs) async {
-      final Map<String, dynamic> queryParams = {
-        "limit": "500", // Max limit
-        "order[chapter]": "desc",
-        // CRITICAL: Must include R18 ratings or they won't show up in feed
-        "contentRating[]": ["safe", "suggestive", "erotica", "pornographic"]
-      };
+      final StringBuffer query = StringBuffer();
+      query.write("limit=500&order[chapter]=desc");
+
+      // CRITICAL: Manually add content ratings to ensure R18 chapters appear
+      query.write("&contentRating[]=safe");
+      query.write("&contentRating[]=suggestive");
+      query.write("&contentRating[]=erotica");
+      query.write("&contentRating[]=pornographic");
 
       if (langs != null) {
-        queryParams["translatedLanguage[]"] = langs;
+        for (var lang in langs) {
+          query.write("&translatedLanguage[]=$lang");
+        }
       }
 
-      final uri = Uri.https("api.mangadex.org", "/manga/$mangaId/feed", queryParams);
-      final res = await http.get(uri, headers: _headers);
+      final uri = Uri.parse("$baseUrl/manga/$mangaId/feed?${query.toString()}");
 
-      if (res.statusCode == 200) {
-        return jsonDecode(res.body)['data'];
+      try {
+        final res = await http.get(uri, headers: _headers);
+        if (res.statusCode == 200) {
+          return jsonDecode(res.body)['data'];
+        }
+      } catch (e) {
+        print("Feed Fetch Error: $e");
       }
       return [];
     }
 
-    // 2. Logic: Try English first
+    // 1. Try English first
     var chapters = await fetch(['en']);
 
-    // 3. Fallback: If no English chapters (e.g. licensed/removed), try ALL languages
+    // 2. If no English, fetch ALL languages (Fallback for Raw/Licensed/Doujin)
     if (chapters.isEmpty) {
       chapters = await fetch(null);
     }
 
-    // 4. Process and Filter
+    // 3. Process
     List<String> results = [];
     for (var c in chapters) {
       final attr = c['attributes'];
 
-      // Skip external links (MangaPlus etc) that break the reader
+      // Skip external links (MangaPlus etc)
       if (attr['externalUrl'] != null) continue;
 
       final String id = c['id'];
       final String num = attr['chapter'] ?? "Oneshot";
       final String lang = attr['translatedLanguage'] ?? "??";
 
-      // Format: ID | ChapterNum [Lang]
+      // Format: ID|Num [Lang]
       results.add("$id|$num [$lang]");
     }
 
@@ -284,7 +292,6 @@ class AnimeModel {
     if (attr['title'] != null) {
       if (attr['title'] is Map) {
         final Map t = attr['title'];
-        // Prefer English title, fallback to any available
         title = t['en'] ?? (t.isNotEmpty ? t.values.first : "Unknown");
       }
     }

@@ -10,7 +10,7 @@ dependencies:
   flutter:
     sdk: flutter
   shared_preferences: ^2.2.2
-
+  file_picker: ^9.0.0
   # Networking
   http: ^1.2.0
 

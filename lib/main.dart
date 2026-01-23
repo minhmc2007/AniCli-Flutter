@@ -6,26 +6,27 @@ import 'dart:math' as math;
 import 'package:animeclient/api/ani_core.dart';
 import 'package:animeclient/user_provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
-import 'package:flutter_markdown/flutter_markdown.dart'; // Required for Changelog
+import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
-import 'package:open_file/open_file.dart'; // Required for installing APK
+import 'package:open_file/open_file.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:permission_handler/permission_handler.dart'; // Required for Android permissions
+import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 // --- APP CONSTANTS ---
-const String kAppVersion = "1.7.2";
-const String kBuildNumber = "172";
+const String kAppVersion = "2.4.6";
+const String kBuildNumber = "246";
 
 // --- THEME COLORS ---
 const kColorCream = Color(0xFFFEEAC9);
@@ -334,7 +335,7 @@ class FloatingOrbsBackground extends StatelessWidget {
 }
 
 // ==========================================
-//      SERVICES & PROVIDERS (UPDATER RESTORED)
+//      SERVICES & PROVIDERS
 // ==========================================
 
 class UpdaterService {
@@ -424,9 +425,8 @@ class UpdaterService {
               backgroundColor: kColorCoral,
               duration: const Duration(seconds: 10),
               action: SnackBarAction(
-                label: "View",
+                label: "Update", // Triggers internal dialog
                 textColor: Colors.white,
-                // THIS NOW OPENS THE INTERNAL DIALOG
                 onPressed: () => _showCozyUpdateDialog(context, remoteTag, body, assets),
               ),
             ));
@@ -594,7 +594,6 @@ class UpdaterService {
       downloadUrl = asset?['browser_download_url'];
       fileName = "AniCli_$version.tar.gz";
     } else {
-      // Fallback for macOS/Web
       launchUrl(Uri.parse("https://github.com/minhmc2007/AniCli-Flutter/releases/latest"),
       mode: LaunchMode.externalApplication);
       return;
@@ -1064,7 +1063,7 @@ class _MainScreenState extends State<MainScreen> {
   @override
   void initState() {
     super.initState();
-    // Check for updates silently on startup (using complex logic)
+    // Check for updates silently on startup
     UpdaterService.checkSilent(context);
   }
 
@@ -1133,7 +1132,7 @@ class _MainScreenState extends State<MainScreen> {
 }
 
 // ==========================================
-//      MANGA READER SCREEN (FIXED)
+//      MANGA READER SCREEN (IMPROVED ZOOM & SCROLL)
 // ==========================================
 class MangaReaderScreen extends StatefulWidget {
   final String mangaId;
@@ -1156,9 +1155,11 @@ class MangaReaderScreen extends StatefulWidget {
 class _MangaReaderScreenState extends State<MangaReaderScreen> {
   bool _isLoading = true;
   List<String> _pages = [];
+  final TransformationController _transformController = TransformationController();
   final ScrollController _scrollController = ScrollController();
   bool _showControls = true;
-  double _scale = 1.0;
+  bool _isCtrlPressed = false;
+  int _pointerCount = 0;
 
   @override
   void initState() {
@@ -1187,9 +1188,48 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
       ));
   }
 
+  Future<void> _downloadImage(String url, int index) async {
+    try {
+      final response = await http.get(Uri.parse(url), headers: {"User-Agent": "AniCli/1.0"});
+      if (response.statusCode == 200) {
+        Directory? dir;
+        if (Platform.isAndroid) {
+          dir = await getExternalStorageDirectory();
+        } else {
+          dir = await getDownloadsDirectory();
+        }
+
+        final safeTitle = widget.title.replaceAll(RegExp(r'[^\w\s]+'), '');
+        final savePath = "${dir?.path}/$safeTitle/Ch${widget.chapterNum}/page_$index.jpg";
+        final file = File(savePath);
+        await file.create(recursive: true);
+        await file.writeAsBytes(response.bodyBytes);
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Saved page $index to $savePath")));
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error saving image: $e")));
+      }
+    }
+  }
+
   String _displayChapter(String raw) {
     if (raw.contains("|")) return raw.split("|")[1];
     return raw;
+  }
+
+  void _handleKey(KeyEvent event) {
+    final bool isCtrl = event.logicalKey == LogicalKeyboardKey.controlLeft ||
+    event.logicalKey == LogicalKeyboardKey.controlRight;
+
+    if (isCtrl) {
+      setState(() {
+        _isCtrlPressed = event is KeyDownEvent || event is KeyRepeatEvent;
+      });
+    }
   }
 
   @override
@@ -1198,51 +1238,87 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
     final hasNext = currentIndex > 0;
     final hasPrev = currentIndex < widget.allChapters.length - 1;
 
+    // Enable InteractiveViewer's scaling IF:
+    // 1. Control key is pressed (for mouse wheel zoom)
+    // 2. OR pointer count > 1 (for touch pinch zoom)
+    final bool enableScaling = _isCtrlPressed || _pointerCount > 1;
+
     return Scaffold(
       backgroundColor: Colors.black,
-      body: Stack(
-        children: [
-          // GESTURE DETECTOR FOR TAP (TOGGLE CONTROLS)
-          GestureDetector(
-            onTap: () => setState(() => _showControls = !_showControls),
-            child: _isLoading
-            ? const Center(child: CircularProgressIndicator(color: kColorCoral))
-            : Listener(
-              // CTRL + SCROLL TO ZOOM LOGIC
+      body: KeyboardListener(
+        focusNode: FocusNode()..requestFocus(),
+        onKeyEvent: _handleKey,
+        child: Stack(
+          children: [
+            // MAIN READER AREA
+            Listener(
+              onPointerDown: (_) => setState(() => _pointerCount++),
+              onPointerUp: (_) => setState(() => _pointerCount--),
+              onPointerCancel: (_) => setState(() => _pointerCount = 0),
               onPointerSignal: (event) {
-                if (event is PointerScrollEvent && HardwareKeyboard.instance.isControlPressed) {
-                  setState(() {
-                    if (event.scrollDelta.dy > 0) {
-                      _scale -= 0.1; // Zoom Out
-                    } else {
-                      _scale += 0.1; // Zoom In
+                if (event is PointerScrollEvent) {
+                  debugPrint("[MangaReader] Event caught: ${event.scrollDelta}");
+                  debugPrint("[MangaReader] Ctrl Pressed: $_isCtrlPressed");
+
+                  if (_isCtrlPressed) {
+                    debugPrint("[MangaReader] Mode: ZOOMING (Ctrl held)");
+
+                    // --- CENTERED ZOOM LOGIC ---
+                    // This calculates the zoom relative to the center of the screen
+                    // preventing the content from drifting to the left/top-left corner.
+
+                    final double scaleFactor = event.scrollDelta.dy < 0 ? 1.1 : 0.9;
+                    final Matrix4 currentMatrix = _transformController.value;
+                    final double currentScale = currentMatrix.getMaxScaleOnAxis();
+                    final double newScale = (currentScale * scaleFactor).clamp(0.1, 5.0);
+
+                    if (newScale >= 0.1 && newScale <= 5.0) {
+                      final Size screenSize = MediaQuery.of(context).size;
+                      final Offset center = Offset(screenSize.width / 2, screenSize.height / 2);
+
+                      // Create a matrix that scales around the center point
+                      // T_new = Translate(C) * Scale(S) * Translate(-C) * T_old
+                      final Matrix4 zoomMatrix = Matrix4.identity()
+                      ..translate(center.dx, center.dy)
+                      ..scale(scaleFactor)
+                      ..translate(-center.dx, -center.dy);
+
+                      _transformController.value = zoomMatrix * currentMatrix;
                     }
-                    _scale = _scale.clamp(0.5, 3.0);
-                  });
+                  } else {
+                    debugPrint("[MangaReader] Mode: SCROLLING (No Ctrl)");
+                    // MANUAL SCROLL LOGIC
+                    if (_scrollController.hasClients) {
+                      final double newOffset = _scrollController.offset + event.scrollDelta.dy;
+                      final double validOffset = newOffset.clamp(
+                        _scrollController.position.minScrollExtent,
+                        _scrollController.position.maxScrollExtent
+                      );
+                      _scrollController.jumpTo(validOffset);
+                    }
+                  }
                 }
               },
-              child: Center(
-                child: SingleChildScrollView(
-                  controller: _scrollController,
-                  physics: const BouncingScrollPhysics(),
-                  child: SizedBox(
-                    // Apply Scale to Width
-                    width: MediaQuery.of(context).size.width * _scale,
-                    child: Column(
-                      children: [
-                        ..._pages.map((url) => CachedNetworkImage(
-                          imageUrl: url,
-                          fit: BoxFit.fitWidth,
-                          width: double.infinity,
-                          placeholder: (context, url) => const SizedBox(
-                            height: 300, child: Center(child: CircularProgressIndicator(color: kColorCoral, strokeWidth: 2))),
-                            errorWidget: (context, url, error) => const SizedBox(
-                              height: 200, child: Center(child: Icon(Icons.broken_image, color: Colors.white54))),
-                              httpHeaders: const {"User-Agent": "AniCli/1.0"},
-                        )).toList(),
-
-                        // NAV BUTTONS
-                        Padding(
+              child: GestureDetector(
+                onTap: () => setState(() => _showControls = !_showControls),
+                child: _isLoading
+                ? const Center(child: CircularProgressIndicator(color: kColorCoral))
+                : InteractiveViewer(
+                  transformationController: _transformController,
+                  minScale: 0.1,
+                  maxScale: 5.0,
+                  scaleEnabled: enableScaling,
+                  panEnabled: true,
+                  trackpadScrollCausesScale: false,
+                  interactionEndFrictionCoefficient: 0.00001,
+                  child: ListView.builder(
+                    controller: _scrollController,
+                    physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+                    cacheExtent: 3000,
+                    itemCount: _pages.length + 1,
+                    itemBuilder: (context, index) {
+                      if (index == _pages.length) {
+                        return Padding(
                           padding: const EdgeInsets.symmetric(vertical: 60),
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -1261,51 +1337,69 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
                                   ),
                             ],
                           ),
-                        )
-                      ],
-                    ),
+                        );
+                      }
+                      return GestureDetector(
+                        onLongPress: () => _downloadImage(_pages[index], index + 1), // Mobile
+                        onSecondaryTap: () => _downloadImage(_pages[index], index + 1), // PC
+                        child: Container(
+                          // Explicitly Center content to fix "Left Align" issue
+                          alignment: Alignment.center,
+                          color: Colors.black, // Fill void with black
+                          child: CachedNetworkImage(
+                            imageUrl: _pages[index],
+                            fit: BoxFit.contain,
+                            width: double.infinity,
+                            // Ensure image itself is centered in its container
+                            alignment: Alignment.center,
+                            placeholder: (context, url) => const SizedBox(
+                              height: 300, child: Center(child: CircularProgressIndicator(color: kColorCoral, strokeWidth: 2))),
+                              errorWidget: (context, url, error) => const SizedBox(
+                                height: 200, child: Center(child: Icon(Icons.broken_image, color: Colors.white54))),
+                                httpHeaders: const {"User-Agent": "AniCli/1.0"},
+                          ),
+                        ),
+                      );
+                    },
                   ),
                 ),
               ),
             ),
-          ),
 
-          AnimatedPositioned(
-            duration: const Duration(milliseconds: 300),
-            top: _showControls ? 0 : -100,
-            left: 0,
-            right: 0,
-            child: Container(
-              color: Colors.black.withOpacity(0.8),
-              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
-              child: SafeArea(
-                bottom: false,
-                child: Row(
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.arrow_back, color: Colors.white),
-                      onPressed: () => Navigator.pop(context),
-                    ),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(widget.title,
-                               style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold), maxLines: 1),
-                               Text("Chapter ${_displayChapter(widget.chapterNum)}",
-                               style: const TextStyle(color: kColorCoral, fontSize: 12)),
-                        ],
+            AnimatedPositioned(
+              duration: const Duration(milliseconds: 300),
+              top: _showControls ? 0 : -100,
+              left: 0,
+              right: 0,
+              child: Container(
+                color: Colors.black.withOpacity(0.8),
+                padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
+                child: SafeArea(
+                  bottom: false,
+                  child: Row(
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.arrow_back, color: Colors.white),
+                        onPressed: () => Navigator.pop(context),
                       ),
-                    ),
-                    // Zoom Indicator
-                    Text("${(_scale * 100).toInt()}%", style: const TextStyle(color: Colors.white54, fontSize: 12)),
-                    const SizedBox(width: 10),
-                  ],
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(widget.title,
+                                 style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold), maxLines: 1),
+                                 Text("Chapter ${_displayChapter(widget.chapterNum)}",
+                                 style: const TextStyle(color: kColorCoral, fontSize: 12)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
-          )
-        ],
+            )
+          ],
+        ),
       ),
     );
   }
@@ -1454,46 +1548,6 @@ class _InternalPlayerScreenState extends State<InternalPlayerScreen> {
     });
   }
 
-  void _showSubtitleDialog() {
-    // Helper to get tracks
-    final tracks = player.state.tracks;
-
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: kColorCream,
-        title: const Text("Select Track", style: TextStyle(fontWeight: FontWeight.bold)),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: ListView(
-            shrinkWrap: true,
-            children: [
-              const Text("Subtitles", style: TextStyle(color: kColorCoral, fontWeight: FontWeight.bold)),
-              ...tracks.subtitle.map((track) => ListTile(
-                title: Text(track.title ?? track.language ?? "Unknown"),
-                trailing: track == player.state.track.subtitle ? const Icon(Icons.check, color: kColorCoral) : null,
-                onTap: () {
-                  player.setSubtitleTrack(track);
-                  Navigator.pop(ctx);
-                },
-              )),
-              const SizedBox(height: 10),
-              const Text("Audio", style: TextStyle(color: kColorCoral, fontWeight: FontWeight.bold)),
-              ...tracks.audio.map((track) => ListTile(
-                title: Text(track.title ?? track.language ?? "Unknown"),
-                trailing: track == player.state.track.audio ? const Icon(Icons.check, color: kColorCoral) : null,
-                onTap: () {
-                  player.setAudioTrack(track);
-                  Navigator.pop(ctx);
-                },
-              )),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   @override
   void dispose() {
     _durationSubscription?.cancel();
@@ -1534,20 +1588,6 @@ class _InternalPlayerScreenState extends State<InternalPlayerScreen> {
             Video(
               controller: controller,
               controls: NoVideoControls,
-              // ADDED SUBTITLE CONFIGURATION HERE (Fixed Style)
-              subtitleViewConfiguration: const SubtitleViewConfiguration(
-                style: TextStyle(
-                  height: 1.4,
-                  fontSize: 24.0,
-                  letterSpacing: 0.0,
-                  wordSpacing: 0.0,
-                  color: Color(0xffffffff), // White text
-                  fontWeight: FontWeight.normal,
-                  backgroundColor: Color(0xB3000000), // 70% Black opacity
-                ),
-                textAlign: TextAlign.center,
-                padding: EdgeInsets.all(24.0),
-              ),
             ),
             Row(
               children: [
@@ -1581,7 +1621,6 @@ class _InternalPlayerScreenState extends State<InternalPlayerScreen> {
                             controller: controller,
                             title: widget.title,
                             onClose: () => Navigator.pop(context),
-                            onTracks: _showSubtitleDialog, // Pass the dialog function
                             formatDuration: _formatDuration),
           ],
         ),
@@ -1601,7 +1640,6 @@ class CustomMobileControls extends StatefulWidget {
   final VideoController controller;
   final String title;
   final VoidCallback onClose;
-  final VoidCallback onTracks; // New Callback
   final String Function(Duration) formatDuration;
 
   const CustomMobileControls({
@@ -1609,7 +1647,6 @@ class CustomMobileControls extends StatefulWidget {
     required this.controller,
     required this.title,
     required this.onClose,
-    required this.onTracks,
     required this.formatDuration,
   });
 
@@ -1645,8 +1682,6 @@ class _CustomMobileControlsState extends State<CustomMobileControls> {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16))),
-                              // Subtitle/Track Button
-                              IconButton(icon: const Icon(Icons.closed_caption, color: Colors.white), onPressed: widget.onTracks),
               ],
             ),
           ),
