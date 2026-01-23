@@ -7,6 +7,8 @@
 ![iOS](https://img.shields.io/badge/iOS-000000?style=for-the-badge&logo=ios&logoColor=white)
 ![License](https://img.shields.io/badge/License-GPLv3-blue.svg?style=for-the-badge)
 
+[![Build Application](https://github.com/minhmc2007/AniCli-Flutter/actions/workflows/main.yml/badge.svg?branch=main)](https://github.com/minhmc2007/AniCli-Flutter/actions/workflows/main.yml)
+
 > **The Cozy Anime Client.**
 > A beautiful, animated Flutter port of the [ani-cli](https://github.com/pystardust/ani-cli) shell script.
 
