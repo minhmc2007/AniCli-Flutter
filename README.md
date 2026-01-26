@@ -63,7 +63,7 @@ brew install mpv
 
 ### 1. Clone the Repository
 ```bash
-git clone https://github.com/yourusername/ani-cli-flutter.git
+git clone https://github.com/ minhmc2007/ani-cli-flutter.git
 cd ani-cli-flutter
 ```
 
