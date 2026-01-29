@@ -25,8 +25,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 // --- APP CONSTANTS ---
-const String kAppVersion = "1.7.3";
-const String kBuildNumber = "173";
+const String kAppVersion = "1.7.5"; // Bumped version for fix
+const String kBuildNumber = "175";
 
 // --- THEME COLORS ---
 const kColorCream = Color(0xFFFEEAC9);
@@ -1132,20 +1132,18 @@ class _MainScreenState extends State<MainScreen> {
 }
 
 // ==========================================
-//      MANGA READER SCREEN (IMPROVED ZOOM & SCROLL)
+//      MANGA READER SCREEN (IMPROVED ZOOM & SCROLL & HISTORY)
 // ==========================================
 class MangaReaderScreen extends StatefulWidget {
-  final String mangaId;
+  final AnimeModel anime; // Changed to accept full AnimeModel for history
   final String chapterNum;
   final List<String> allChapters;
-  final String title;
 
   const MangaReaderScreen({
     super.key,
-    required this.mangaId,
+    required this.anime,
     required this.chapterNum,
     required this.allChapters,
-    required this.title,
   });
 
   @override
@@ -1179,12 +1177,18 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
   }
 
   void _navigateToChapter(String newChap) {
+    // FIX: Update history before navigating
+    context.read<UserProvider>().addToHistory(widget.anime, newChap);
+
     Navigator.pushReplacement(
       context,
       PageRouteBuilder(
         pageBuilder: (_, __, ___) => MangaReaderScreen(
-          mangaId: widget.mangaId, chapterNum: newChap, allChapters: widget.allChapters, title: widget.title),
-          transitionsBuilder: (_, a, __, c) => FadeTransition(opacity: a, child: c),
+          anime: widget.anime,
+          chapterNum: newChap,
+          allChapters: widget.allChapters,
+        ),
+        transitionsBuilder: (_, a, __, c) => FadeTransition(opacity: a, child: c),
       ));
   }
 
@@ -1199,7 +1203,7 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
           dir = await getDownloadsDirectory();
         }
 
-        final safeTitle = widget.title.replaceAll(RegExp(r'[^\w\s]+'), '');
+        final safeTitle = widget.anime.name.replaceAll(RegExp(r'[^\w\s]+'), '');
         final savePath = "${dir?.path}/$safeTitle/Ch${widget.chapterNum}/page_$index.jpg";
         final file = File(savePath);
         await file.create(recursive: true);
@@ -1386,7 +1390,7 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(widget.title,
+                            Text(widget.anime.name,
                                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold), maxLines: 1),
                                  Text("Chapter ${_displayChapter(widget.chapterNum)}",
                                  style: const TextStyle(color: kColorCoral, fontSize: 12)),
@@ -2528,10 +2532,9 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
         context,
         MaterialPageRoute(
           builder: (ctx) => MangaReaderScreen(
-            mangaId: widget.anime.id,
+            anime: widget.anime, // Pass full object for history to work on next/prev
             chapterNum: idNum,
             allChapters: _episodes,
-            title: widget.anime.name,
           )));
       return;
     }
