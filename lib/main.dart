@@ -25,8 +25,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 // --- APP CONSTANTS ---
-const String kAppVersion = "1.7.5"; // Bumped version for fix
-const String kBuildNumber = "175";
+const String kAppVersion = "1.7.4"; // Bumped version for fix
+const String kBuildNumber = "174";
 
 // --- THEME COLORS ---
 const kColorCream = Color(0xFFFEEAC9);
