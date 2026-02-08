@@ -25,8 +25,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 // --- APP CONSTANTS ---
-const String kAppVersion = "1.7.4"; // Bumped version for fix
-const String kBuildNumber = "174";
+const String kAppVersion = "1.7.5";
+const String kBuildNumber = "175";
 
 // --- THEME COLORS ---
 const kColorCream = Color(0xFFFEEAC9);
@@ -63,6 +63,9 @@ class AniCliApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // initialize performance check on startup
+    context.read<SettingsProvider>().initPerformanceMode();
+
     return MaterialApp(
       title: 'AniCli Flutter',
       debugShowCheckedModeBanner: false,
@@ -87,6 +90,126 @@ class AniCliApp extends StatelessWidget {
       ),
       home: isFirstLaunch ? const OnboardingScreen() : const MainScreen(),
     );
+  }
+}
+
+// ==========================================
+//      MEMORY UTILS (RAM DETECTION)
+// ==========================================
+class MemoryUtils {
+  /// Returns total RAM in GB (estimated). Returns -1 if unable to detect.
+  static Future<double> getTotalRamGB() async {
+    try {
+      if (Platform.isLinux) {
+        final result = await Process.run('grep', ['MemTotal', '/proc/meminfo']);
+        if (result.stdout.toString().isNotEmpty) {
+          // Output format: MemTotal:        16303032 kB
+          final parts = result.stdout.toString().trim().split(RegExp(r'\s+'));
+          if (parts.length >= 2) {
+            final kb = int.tryParse(parts[1]);
+            if (kb != null) return kb / 1024 / 1024;
+          }
+        }
+      } else if (Platform.isWindows) {
+        final result = await Process.run('wmic', ['computersystem', 'get', 'totalphysicalmemory']);
+        // Output: TotalPhysicalMemory \n 34359738368
+        final lines = result.stdout.toString().trim().split('\n');
+        if (lines.length >= 2) {
+          final bytes = int.tryParse(lines[1].trim());
+          if (bytes != null) return bytes / 1024 / 1024 / 1024;
+        }
+      } else if (Platform.isMacOS) {
+        final result = await Process.run('sysctl', ['-n', 'hw.memsize']);
+        final bytes = int.tryParse(result.stdout.toString().trim());
+        if (bytes != null) return bytes / 1024 / 1024 / 1024;
+      }
+    } catch (e) {
+      debugPrint("RAM Detection failed: $e");
+    }
+    // Fallback for Mobile (Assume "Mid" tier ~6GB as safe default if unknown)
+    return -1;
+  }
+}
+
+// ==========================================
+//      SETTINGS PROVIDER & PERFORMANCE LOGIC
+// ==========================================
+
+enum PerformanceMode { auto, bestLooking, balanced, bestPerformance }
+enum PerformanceTier { high, mid, low }
+
+class SettingsProvider extends ChangeNotifier {
+  bool _useInternalPlayer = false;
+  PerformanceMode _perfMode = PerformanceMode.auto;
+  PerformanceTier _currentTier = PerformanceTier.high;
+  double _detectedRamGB = -1;
+
+  bool get useInternalPlayer => _useInternalPlayer;
+  PerformanceMode get perfMode => _perfMode;
+  PerformanceTier get tier => _currentTier;
+  String get ramDebugInfo => _detectedRamGB == -1 ? "Unknown" : "${_detectedRamGB.toStringAsFixed(1)} GB";
+
+  SettingsProvider() {
+    _loadSettings();
+  }
+
+  Future<void> _loadSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    _useInternalPlayer = prefs.getBool('use_internal_player') ?? false;
+    final perfIndex = prefs.getInt('perf_mode') ?? 0;
+    _perfMode = PerformanceMode.values[perfIndex];
+    await initPerformanceMode();
+  }
+
+  Future<void> initPerformanceMode() async {
+    // Detect RAM once
+    if (_detectedRamGB == -1) {
+      _detectedRamGB = await MemoryUtils.getTotalRamGB();
+    }
+    _calculateTier();
+    notifyListeners();
+  }
+
+  void _calculateTier() {
+    if (_perfMode == PerformanceMode.bestLooking) {
+      _currentTier = PerformanceTier.high;
+    } else if (_perfMode == PerformanceMode.balanced) {
+      _currentTier = PerformanceTier.mid;
+    } else if (_perfMode == PerformanceMode.bestPerformance) {
+      _currentTier = PerformanceTier.low;
+    } else {
+      // AUTO MODE
+      if (_detectedRamGB == -1) {
+        // Fallback if detection failed:
+        // Desktop usually handles High, Mobile usually Mid.
+        if (Platform.isAndroid || Platform.isIOS) {
+          _currentTier = PerformanceTier.mid;
+        } else {
+          _currentTier = PerformanceTier.high;
+        }
+      } else if (_detectedRamGB > 8.0) {
+        _currentTier = PerformanceTier.high;
+      } else if (_detectedRamGB >= 4.0) {
+        _currentTier = PerformanceTier.mid;
+      } else {
+        _currentTier = PerformanceTier.low;
+      }
+    }
+  }
+
+  void toggleInternalPlayer(bool value) async {
+    _useInternalPlayer = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('use_internal_player', value);
+    notifyListeners();
+  }
+
+  void setPerformanceMode(PerformanceMode mode) async {
+    _perfMode = mode;
+    _calculateTier();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('perf_mode', mode.index);
+    notifyListeners();
   }
 }
 
@@ -149,6 +272,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Onboarding always looks best, we don't downgrade this one-time screen
+    // unless strictly necessary, but sticking to design.
     return Scaffold(
       body: Container(
         decoration: const BoxDecoration(
@@ -282,8 +407,17 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
 class FloatingOrbsBackground extends StatelessWidget {
   const FloatingOrbsBackground({super.key});
+
   @override
   Widget build(BuildContext context) {
+    // Check performance tier
+    final tier = context.select<SettingsProvider, PerformanceTier>((p) => p.tier);
+
+    // Low Tier: Disable floating animation, just return a static gradient or simple container
+    if (tier == PerformanceTier.low) {
+      return Container(color: Colors.transparent);
+    }
+
     return Stack(
       children: [
         Positioned(
@@ -864,15 +998,6 @@ class ProgressProvider extends ChangeNotifier {
   }
 }
 
-class SettingsProvider extends ChangeNotifier {
-  bool _useInternalPlayer = false;
-  bool get useInternalPlayer => _useInternalPlayer;
-  void toggleInternalPlayer(bool value) {
-    _useInternalPlayer = value;
-    notifyListeners();
-  }
-}
-
 // ==========================================
 //      COMMON WIDGETS
 // ==========================================
@@ -896,6 +1021,21 @@ class LiquidGlassContainer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final rRadius = borderRadius ?? BorderRadius.circular(20);
+    final tier = context.select<SettingsProvider, PerformanceTier>((p) => p.tier);
+
+    // PERFORMANCE: Low Tier disables blur to save GPU
+    if (tier == PerformanceTier.low) {
+      return Container(
+        decoration: BoxDecoration(
+          // Solid-ish background instead of blur
+          color: Colors.white.withOpacity(0.9),
+          borderRadius: rRadius,
+          border: border ?? Border.all(color: Colors.black12, width: 1.0),
+        ),
+        child: child,
+      );
+    }
+
     return ClipRRect(
       borderRadius: rRadius,
       child: BackdropFilter(
@@ -939,6 +1079,10 @@ class CozyHeroImage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tier = context.select<SettingsProvider, PerformanceTier>((p) => p.tier);
+    // Low tier removes shadow calculation
+    final showShadow = withShadow && tier != PerformanceTier.low;
+
     return Hero(
       tag: heroTag,
       child: Material(
@@ -946,7 +1090,7 @@ class CozyHeroImage extends StatelessWidget {
         child: Container(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(radius),
-            boxShadow: withShadow
+            boxShadow: showShadow
             ? [
               BoxShadow(
                 color: kColorCoral.withOpacity(0.3),
@@ -987,7 +1131,7 @@ class _LiveGradientBackgroundState extends State<LiveGradientBackground> with Si
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(vsync: this, duration: const Duration(seconds: 15))..repeat(reverse: true);
+    _controller = AnimationController(vsync: this, duration: const Duration(seconds: 15));
 
     _topAlignmentAnimation = TweenSequence<Alignment>([
       TweenSequenceItem(tween: Tween(begin: Alignment.topLeft, end: Alignment.topRight), weight: 1),
@@ -1002,6 +1146,28 @@ class _LiveGradientBackgroundState extends State<LiveGradientBackground> with Si
       TweenSequenceItem(tween: Tween(begin: Alignment.topLeft, end: Alignment.topRight), weight: 1),
       TweenSequenceItem(tween: Tween(begin: Alignment.topRight, end: Alignment.bottomRight), weight: 1),
     ]).animate(_controller);
+
+    _checkPerformance();
+  }
+
+  void _checkPerformance() {
+    // We can't access context in initState directly easily without a delay or didChangeDependencies
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final tier = context.read<SettingsProvider>().tier;
+      if (tier == PerformanceTier.low) {
+        // Stop animation for low end devices
+        if (_controller.isAnimating) _controller.stop();
+      } else {
+        if (!_controller.isAnimating) _controller.repeat(reverse: true);
+      }
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _checkPerformance();
   }
 
   @override
@@ -1053,6 +1219,11 @@ class _MainScreenState extends State<MainScreen> {
       PageRouteBuilder(
         pageBuilder: (context, animation, secondaryAnimation) => AnimeDetailView(anime: anime, heroTag: heroTag),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          final tier = context.read<SettingsProvider>().tier;
+          // Simplify transition for lower tiers
+          if (tier == PerformanceTier.low) return child;
+          if (tier == PerformanceTier.mid) return FadeTransition(opacity: animation, child: child);
+
           return FadeTransition(opacity: animation, child: child);
         },
         transitionDuration: const Duration(milliseconds: 600),
@@ -1092,21 +1263,27 @@ class _MainScreenState extends State<MainScreen> {
         break;
     }
 
+    final tier = context.watch<SettingsProvider>().tier;
+
     return Scaffold(
       body: LiveGradientBackground(
         child: Stack(
           children: [
             AnimatedSwitcher(
-              duration: const Duration(milliseconds: 500),
+              duration: tier == PerformanceTier.low ? Duration.zero : const Duration(milliseconds: 500),
               switchInCurve: Curves.easeOutQuart,
                 switchOutCurve: Curves.easeInQuart,
                   transitionBuilder: (child, animation) {
+                    if (tier == PerformanceTier.low) return child;
+
                     return FadeTransition(
                       opacity: animation,
-                      child: SlideTransition(
+                      child: tier == PerformanceTier.high
+                      ? SlideTransition(
                         position: Tween<Offset>(begin: const Offset(0.05, 0), end: Offset.zero).animate(animation),
                         child: child,
-                      ),
+                      )
+                      : child, // Mid tier just fades
                     );
                   },
                   child: KeyedSubtree(key: activeKey, child: activePage),
@@ -1132,10 +1309,10 @@ class _MainScreenState extends State<MainScreen> {
 }
 
 // ==========================================
-//      MANGA READER SCREEN (IMPROVED ZOOM & SCROLL & HISTORY)
+//      MANGA READER SCREEN
 // ==========================================
 class MangaReaderScreen extends StatefulWidget {
-  final AnimeModel anime; // Changed to accept full AnimeModel for history
+  final AnimeModel anime;
   final String chapterNum;
   final List<String> allChapters;
 
@@ -1177,7 +1354,6 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
   }
 
   void _navigateToChapter(String newChap) {
-    // FIX: Update history before navigating
     context.read<UserProvider>().addToHistory(widget.anime, newChap);
 
     Navigator.pushReplacement(
@@ -1242,9 +1418,6 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
     final hasNext = currentIndex > 0;
     final hasPrev = currentIndex < widget.allChapters.length - 1;
 
-    // Enable InteractiveViewer's scaling IF:
-    // 1. Control key is pressed (for mouse wheel zoom)
-    // 2. OR pointer count > 1 (for touch pinch zoom)
     final bool enableScaling = _isCtrlPressed || _pointerCount > 1;
 
     return Scaffold(
@@ -1261,16 +1434,7 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
               onPointerCancel: (_) => setState(() => _pointerCount = 0),
               onPointerSignal: (event) {
                 if (event is PointerScrollEvent) {
-                  debugPrint("[MangaReader] Event caught: ${event.scrollDelta}");
-                  debugPrint("[MangaReader] Ctrl Pressed: $_isCtrlPressed");
-
                   if (_isCtrlPressed) {
-                    debugPrint("[MangaReader] Mode: ZOOMING (Ctrl held)");
-
-                    // --- CENTERED ZOOM LOGIC ---
-                    // This calculates the zoom relative to the center of the screen
-                    // preventing the content from drifting to the left/top-left corner.
-
                     final double scaleFactor = event.scrollDelta.dy < 0 ? 1.1 : 0.9;
                     final Matrix4 currentMatrix = _transformController.value;
                     final double currentScale = currentMatrix.getMaxScaleOnAxis();
@@ -1280,8 +1444,6 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
                       final Size screenSize = MediaQuery.of(context).size;
                       final Offset center = Offset(screenSize.width / 2, screenSize.height / 2);
 
-                      // Create a matrix that scales around the center point
-                      // T_new = Translate(C) * Scale(S) * Translate(-C) * T_old
                       final Matrix4 zoomMatrix = Matrix4.identity()
                       ..translate(center.dx, center.dy)
                       ..scale(scaleFactor)
@@ -1290,8 +1452,6 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
                       _transformController.value = zoomMatrix * currentMatrix;
                     }
                   } else {
-                    debugPrint("[MangaReader] Mode: SCROLLING (No Ctrl)");
-                    // MANUAL SCROLL LOGIC
                     if (_scrollController.hasClients) {
                       final double newOffset = _scrollController.offset + event.scrollDelta.dy;
                       final double validOffset = newOffset.clamp(
@@ -1347,14 +1507,12 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
                         onLongPress: () => _downloadImage(_pages[index], index + 1), // Mobile
                         onSecondaryTap: () => _downloadImage(_pages[index], index + 1), // PC
                         child: Container(
-                          // Explicitly Center content to fix "Left Align" issue
                           alignment: Alignment.center,
-                          color: Colors.black, // Fill void with black
+                          color: Colors.black,
                           child: CachedNetworkImage(
                             imageUrl: _pages[index],
                             fit: BoxFit.contain,
                             width: double.infinity,
-                            // Ensure image itself is centered in its container
                             alignment: Alignment.center,
                             placeholder: (context, url) => const SizedBox(
                               height: 300, child: Center(child: CircularProgressIndicator(color: kColorCoral, strokeWidth: 2))),
@@ -1410,7 +1568,7 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
 }
 
 // ==========================================
-//      VIDEO PLAYER SCREEN (UPDATED)
+//      VIDEO PLAYER SCREEN
 // ==========================================
 class InternalPlayerScreen extends StatefulWidget {
   final String streamUrl;
@@ -1817,9 +1975,21 @@ class _CenterPlayButtonState extends State<CenterPlayButton> with TickerProvider
   @override
   void initState() {
     super.initState();
-    _pulseCtrl = AnimationController(vsync: this, duration: const Duration(seconds: 2))..repeat();
+    _pulseCtrl = AnimationController(vsync: this, duration: const Duration(seconds: 2));
     _iconCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 300));
     if (widget.isPlaying) _iconCtrl.forward();
+    _checkPerformance();
+  }
+
+  void _checkPerformance() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if(!mounted) return;
+      if (context.read<SettingsProvider>().tier == PerformanceTier.low) {
+        _pulseCtrl.stop(); // Disable pulse on low end
+      } else {
+        if(!widget.isPlaying) _pulseCtrl.repeat();
+      }
+    });
   }
 
   @override
@@ -1828,8 +1998,12 @@ class _CenterPlayButtonState extends State<CenterPlayButton> with TickerProvider
     if (widget.isPlaying != oldWidget.isPlaying) {
       if (widget.isPlaying) {
         _iconCtrl.forward();
+        _pulseCtrl.stop();
       } else {
         _iconCtrl.reverse();
+        if(context.read<SettingsProvider>().tier != PerformanceTier.low) {
+          _pulseCtrl.repeat();
+        }
       }
     }
   }
@@ -1977,6 +2151,14 @@ class _BrowseViewState extends State<BrowseView> with AutomaticKeepAliveClientMi
   Widget build(BuildContext context) {
     super.build(context);
     final isMobile = MediaQuery.of(context).size.width < 900;
+    final tier = context.watch<SettingsProvider>().tier;
+
+    // Helper to reduce code duplication for animations
+    Widget animate(Widget child, {bool delay = false}) {
+      if (tier == PerformanceTier.low) return child;
+      if (tier == PerformanceTier.mid) return child.animate(delay: delay ? 200.ms : 0.ms).fadeIn();
+      return child.animate(delay: delay ? 200.ms : 0.ms).fadeIn().slideY(begin: 0.2, end: 0);
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1997,58 +2179,51 @@ class _BrowseViewState extends State<BrowseView> with AutomaticKeepAliveClientMi
 
         const SizedBox(height: 15),
 
-        Padding(
-          padding: EdgeInsets.symmetric(horizontal: isMobile ? 20 : 40),
-          child: Row(
-            children: [
-              if (_currentQuery.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(right: 15),
-                  child: IconButton(
-                    onPressed: () {
-                      _searchCtrl.clear();
-                      _doSearch("");
-                    },
-                    icon: const Icon(LucideIcons.arrowLeftCircle, color: kColorCoral, size: 32)
-                  ).animate().scale().fadeIn(),
-                ),
-                Expanded(
-                  child: LiquidGlassContainer(
-                    borderRadius: BorderRadius.circular(20),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
-                      child: TextField(
-                        controller: _searchCtrl,
-                        style: const TextStyle(color: kColorDarkText, fontWeight: FontWeight.w600),
-                        decoration: InputDecoration(
-                          hintText: _isMangaMode ? "Search Manga..." : "Search Anime...",
-                          hintStyle: const TextStyle(color: Colors.black38),
-                          border: InputBorder.none,
-                          icon: const Icon(LucideIcons.search, color: kColorCoral),
+        animate(
+          Padding(
+            padding: EdgeInsets.symmetric(horizontal: isMobile ? 20 : 40),
+            child: Row(
+              children: [
+                if (_currentQuery.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 15),
+                    child: IconButton(
+                      onPressed: () {
+                        _searchCtrl.clear();
+                        _doSearch("");
+                      },
+                      icon: const Icon(LucideIcons.arrowLeftCircle, color: kColorCoral, size: 32)
+                    ),
+                  ),
+                  Expanded(
+                    child: LiquidGlassContainer(
+                      borderRadius: BorderRadius.circular(20),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        child: TextField(
+                          controller: _searchCtrl,
+                          style: const TextStyle(color: kColorDarkText, fontWeight: FontWeight.w600),
+                          decoration: InputDecoration(
+                            hintText: _isMangaMode ? "Search Manga..." : "Search Anime...",
+                            hintStyle: const TextStyle(color: Colors.black38),
+                            border: InputBorder.none,
+                            icon: const Icon(LucideIcons.search, color: kColorCoral),
+                          ),
+                          onSubmitted: _doSearch,
                         ),
-                        onSubmitted: _doSearch,
                       ),
                     ),
                   ),
-                ),
-            ],
+              ],
+            ),
           ),
-        ).animate().fadeIn().slideY(begin: -0.5, end: 0),
+        ),
         const SizedBox(height: 20),
         Expanded(
           child: AnimatedSwitcher(
-            duration: const Duration(milliseconds: 500),
+            duration: tier == PerformanceTier.low ? Duration.zero : const Duration(milliseconds: 500),
             switchInCurve: Curves.easeOutQuart,
               switchOutCurve: Curves.easeInQuart,
-                transitionBuilder: (child, animation) {
-                  return FadeTransition(
-                    opacity: animation,
-                    child: ScaleTransition(
-                      scale: Tween<double>(begin: 0.98, end: 1.0).animate(animation),
-                      child: child,
-                    ),
-                  );
-                },
                 child: _isLoading
                 ? const Center(child: CircularProgressIndicator(color: kColorCoral))
                 : KeyedSubtree(
@@ -2062,9 +2237,12 @@ class _BrowseViewState extends State<BrowseView> with AutomaticKeepAliveClientMi
                       children: [
                         if (_currentQuery.isEmpty) ...[
                           if (!_isMangaMode && _items.length > 5) ...[
-                            Padding(
-                              padding: EdgeInsets.only(left: isMobile ? 20 : 40, bottom: 15),
-                              child: Text("Spotlight", style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.bold, color: kColorCoral)).animate().fadeIn(delay: 200.ms),
+                            animate(
+                              Padding(
+                                padding: EdgeInsets.only(left: isMobile ? 20 : 40, bottom: 15),
+                                child: Text("Spotlight", style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.bold, color: kColorCoral)),
+                              ),
+                              delay: true
                             ),
                             FeaturedCarousel(animes: _items.take(5).toList(), onTap: widget.onAnimeTap),
                             const SizedBox(height: 30),
@@ -2076,13 +2254,15 @@ class _BrowseViewState extends State<BrowseView> with AutomaticKeepAliveClientMi
                                 children: [
                                   const Positioned.fill(child: FloatingOrbsBackground()),
                                   Center(
-                                    child: Column(
-                                      mainAxisAlignment: MainAxisAlignment.center,
-                                      children: [
-                                        Text("MangaDex", style: GoogleFonts.outfit(fontSize: 40, fontWeight: FontWeight.bold, color: kColorDarkText)),
-                                        Text("Read the world's library", style: GoogleFonts.inter(fontSize: 16, color: kColorDarkText.withOpacity(0.6))),
-                                      ],
-                                    ).animate().slideY(begin: 0.2, end: 0).fadeIn(),
+                                    child: animate(
+                                      Column(
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          Text("MangaDex", style: GoogleFonts.outfit(fontSize: 40, fontWeight: FontWeight.bold, color: kColorDarkText)),
+                                          Text("Read the world's library", style: GoogleFonts.inter(fontSize: 16, color: kColorDarkText.withOpacity(0.6))),
+                                        ],
+                                      ),
+                                    ),
                                   )
                                 ],
                               ),
@@ -2091,14 +2271,17 @@ class _BrowseViewState extends State<BrowseView> with AutomaticKeepAliveClientMi
                           ],
                         ],
 
-                        Padding(
-                          padding: EdgeInsets.only(left: isMobile ? 20 : 40, bottom: 15),
-                          child: Text(
-                            _currentQuery.isEmpty
-                            ? (_isMangaMode ? "Popular Updates" : "Trending Anime")
-                            : "Results",
-                            style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.bold, color: kColorDarkText),
-                          ).animate().fadeIn(delay: 200.ms),
+                        animate(
+                          Padding(
+                            padding: EdgeInsets.only(left: isMobile ? 20 : 40, bottom: 15),
+                            child: Text(
+                              _currentQuery.isEmpty
+                              ? (_isMangaMode ? "Popular Updates" : "Trending Anime")
+                              : "Results",
+                              style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.bold, color: kColorDarkText),
+                            ),
+                          ),
+                          delay: true
                         ),
                         AnimeGrid(animes: _items, onTap: widget.onAnimeTap, tagPrefix: "browse"),
                         const SizedBox(height: 120),
@@ -2151,33 +2334,41 @@ class _HistoryViewState extends State<HistoryView> with AutomaticKeepAliveClient
     super.build(context);
     final history = context.watch<UserProvider>().history;
     final isMobile = MediaQuery.of(context).size.width < 900;
+    final tier = context.watch<SettingsProvider>().tier;
+
+    // Performance wrapper
+    Widget adaptAnimate(Widget child, {int index = 0}) {
+      if (tier == PerformanceTier.low) return child;
+      if (tier == PerformanceTier.mid) return child.animate(delay: (index * 50).ms).fadeIn(duration: 300.ms);
+      return child.animate(delay: (index * 50).ms).slideX(begin: 0.2, end: 0, curve: Curves.easeOutCubic, duration: 400.ms).fadeIn(duration: 400.ms);
+    }
 
     return Column(
       children: [
         const SizedBox(height: 60),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text("History",
-                 style: GoogleFonts.inter(fontSize: 32, fontWeight: FontWeight.bold, color: kColorCoral)),
-                 if (history.isNotEmpty)
-                   Padding(
-                     padding: const EdgeInsets.only(left: 10),
-                     child: IconButton(
-                       icon: const Icon(LucideIcons.trash2, size: 20, color: kColorDarkText),
-                       onPressed: () => context.read<UserProvider>().clearHistory(),
-                     ),
-                   ).animate().scale()
-          ],
-        ).animate().fadeIn().slideY(begin: -0.5, end: 0),
+        adaptAnimate(
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text("History",
+                   style: GoogleFonts.inter(fontSize: 32, fontWeight: FontWeight.bold, color: kColorCoral)),
+                   if (history.isNotEmpty)
+                     Padding(
+                       padding: const EdgeInsets.only(left: 10),
+                       child: IconButton(
+                         icon: const Icon(LucideIcons.trash2, size: 20, color: kColorDarkText),
+                         onPressed: () => context.read<UserProvider>().clearHistory(),
+                       ),
+                     )
+            ],
+          )
+        ),
         const SizedBox(height: 20),
         Expanded(
           child: history.isEmpty
           ? Center(
             child: Column(mainAxisSize: MainAxisSize.min, children: [
-              Icon(LucideIcons.ghost, size: 60, color: kColorCoral.withOpacity(0.5))
-              .animate(onPlay: (c) => c.repeat(reverse: true))
-              .slideY(begin: -0.1, end: 0.1, duration: 2.seconds),
+              Icon(LucideIcons.ghost, size: 60, color: kColorCoral.withOpacity(0.5)),
               const SizedBox(height: 10),
               Text("Nothing here yet...", style: GoogleFonts.inter(color: Colors.black45, fontSize: 16)),
             ]),
@@ -2188,18 +2379,13 @@ class _HistoryViewState extends State<HistoryView> with AutomaticKeepAliveClient
             itemCount: history.length,
             itemBuilder: (ctx, i) {
               final item = history[i];
-              return HistoryCard(
-                item: item,
-                onTap: () => widget.onAnimeTap(item.anime, "history_${item.anime.id}"),
-              )
-              .animate(delay: (i * 100).ms)
-              .slideX(
-                begin: 0.2,
-                end: 0,
-                curve: Curves.easeOutCubic,
-                duration: 500.ms,
-              )
-              .fadeIn(duration: 400.ms);
+              return adaptAnimate(
+                HistoryCard(
+                  item: item,
+                  onTap: () => widget.onAnimeTap(item.anime, "history_${item.anime.id}"),
+                ),
+                index: i
+              );
             },
           ),
         ),
@@ -2222,14 +2408,19 @@ class _FavoritesViewState extends State<FavoritesView> with AutomaticKeepAliveCl
   Widget build(BuildContext context) {
     super.build(context);
     final favorites = context.watch<UserProvider>().favorites;
+    final tier = context.watch<SettingsProvider>().tier;
+
+    Widget header = Text("Favorites",
+                         style: GoogleFonts.inter(fontSize: 32, fontWeight: FontWeight.bold, color: kColorCoral));
+
+    if (tier != PerformanceTier.low) {
+      header = header.animate().fadeIn().slideY(begin: -0.5, end: 0);
+    }
+
     return Column(
       children: [
         const SizedBox(height: 60),
-        Text("Favorites",
-             style: GoogleFonts.inter(fontSize: 32, fontWeight: FontWeight.bold, color: kColorCoral))
-        .animate()
-        .fadeIn()
-        .slideY(begin: -0.5, end: 0),
+        header,
         const SizedBox(height: 20),
         Expanded(
           child: favorites.isEmpty
@@ -2273,6 +2464,14 @@ class _SettingsViewState extends State<SettingsView> {
   Widget build(BuildContext context) {
     final isMobile = MediaQuery.of(context).size.width < 900;
     final settingsProvider = context.watch<SettingsProvider>();
+    final tier = settingsProvider.tier;
+
+    // Performance Wrapper
+    Widget animate(Widget child, int index) {
+      if (tier == PerformanceTier.low) return child;
+      if (tier == PerformanceTier.mid) return child.animate(delay: (index * 50).ms).fadeIn();
+      return child.animate(delay: (index * 50).ms).slideX(begin: 0.2, end: 0, curve: Curves.easeOutCubic, duration: 400.ms).fadeIn();
+    }
 
     final List<Widget> settingsItems = [
       _buildSectionTitle("General"),
@@ -2283,6 +2482,48 @@ class _SettingsViewState extends State<SettingsView> {
         onTap: () => UpdaterService.checkAndUpdate(context),
       ),
       const SizedBox(height: 10),
+      _buildSectionTitle("Performance"),
+      LiquidGlassContainer(
+        opacity: 0.6,
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(LucideIcons.zap, color: kColorCoral),
+                  const SizedBox(width: 10),
+                  const Text("Visual Mode", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                ],
+              ),
+              const SizedBox(height: 10),
+              DropdownButton<PerformanceMode>(
+                value: settingsProvider.perfMode,
+                isExpanded: true,
+                dropdownColor: kColorCream,
+                underline: Container(height: 1, color: kColorCoral),
+                items: const [
+                  DropdownMenuItem(value: PerformanceMode.auto, child: Text("Auto (Detect RAM)")),
+                  DropdownMenuItem(value: PerformanceMode.bestLooking, child: Text("Best Looking (High)")),
+                  DropdownMenuItem(value: PerformanceMode.balanced, child: Text("Balanced (Mid)")),
+                  DropdownMenuItem(value: PerformanceMode.bestPerformance, child: Text("Best Performance (Low)")),
+                ],
+                onChanged: (PerformanceMode? newVal) {
+                  if (newVal != null) settingsProvider.setPerformanceMode(newVal);
+                },
+              ),
+              const SizedBox(height: 5),
+              Text(
+                "Current Tier: ${settingsProvider.tier.name.toUpperCase()}  •  Detected RAM: ${settingsProvider.ramDebugInfo}",
+                style: const TextStyle(fontSize: 12, color: Colors.black54),
+              ),
+            ],
+          ),
+        ),
+      ),
+      const SizedBox(height: 15),
+
       if (Platform.isLinux || Platform.isWindows || Platform.isMacOS)
         _buildSwitchTile(
           icon: LucideIcons.playCircle,
@@ -2337,14 +2578,15 @@ class _SettingsViewState extends State<SettingsView> {
         const SizedBox(height: 100),
     ];
 
+    Widget title = Text("Settings",
+                        style: GoogleFonts.inter(fontSize: 32, fontWeight: FontWeight.bold, color: kColorCoral));
+
+    if (tier != PerformanceTier.low) title = title.animate().fadeIn().slideY(begin: -0.5, end: 0);
+
     return Column(
       children: [
         const SizedBox(height: 60),
-        Text("Settings",
-             style: GoogleFonts.inter(fontSize: 32, fontWeight: FontWeight.bold, color: kColorCoral))
-        .animate()
-        .fadeIn()
-        .slideY(begin: -0.5, end: 0),
+        title,
         const SizedBox(height: 20),
         Expanded(
           child: ListView.builder(
@@ -2352,15 +2594,7 @@ class _SettingsViewState extends State<SettingsView> {
             padding: EdgeInsets.symmetric(horizontal: isMobile ? 20 : 40, vertical: 10),
             itemCount: settingsItems.length,
             itemBuilder: (context, index) {
-              return settingsItems[index]
-              .animate(delay: (index * 100).ms)
-              .slideX(
-                begin: 0.2,
-                end: 0,
-                curve: Curves.easeOutCubic,
-                duration: 500.ms,
-              )
-              .fadeIn(duration: 400.ms);
+              return animate(settingsItems[index], index);
             },
           ),
         ),
@@ -2847,16 +3081,15 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
           : SliverList(
             delegate: SliverChildBuilderDelegate(
               (context, i) {
-                return EpisodeRowCard(
-                  epNum: _displayChapter(_episodes[i]),
-                  isDownloadMode: _isDownloadMode,
-                  isManga: widget.anime.isManga,
-                  onTap: () => _handleItemTap(_episodes[i]),
-                )
-                // --- STAGGERED ANIMATION FIX ---
-                .animate(delay: Duration(milliseconds: (i % 15) * 80))
-                .slideX(begin: 0.1, end: 0, duration: 600.ms, curve: Curves.easeOutCubic)
-                .fadeIn(duration: 600.ms);
+                return _wrapAnim(
+                  EpisodeRowCard(
+                    epNum: _displayChapter(_episodes[i]),
+                    isDownloadMode: _isDownloadMode,
+                    isManga: widget.anime.isManga,
+                    onTap: () => _handleItemTap(_episodes[i]),
+                  ),
+                  i
+                );
               },
               childCount: _episodes.length,
             ),
@@ -2864,6 +3097,14 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
         ),
       ],
     );
+  }
+
+  // Animation wrapper
+  Widget _wrapAnim(Widget child, int index) {
+    final tier = context.watch<SettingsProvider>().tier;
+    if (tier == PerformanceTier.low) return child;
+    if (tier == PerformanceTier.mid) return child.animate(delay: (index % 15 * 50).ms).fadeIn();
+    return child.animate(delay: (index % 15 * 50).ms).slideX(begin: 0.1, end: 0, duration: 600.ms, curve: Curves.easeOutCubic).fadeIn(duration: 600.ms);
   }
 
   String _displayChapter(String raw) {
@@ -2881,21 +3122,15 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
       addAutomaticKeepAlives: true,
       itemCount: _episodes.length,
       itemBuilder: (ctx, i) {
-        return EpisodeRowCard(
-          epNum: _displayChapter(_episodes[i]),
-          isDownloadMode: _isDownloadMode,
-          isManga: widget.anime.isManga,
-          onTap: () => _handleItemTap(_episodes[i]),
-        )
-        // --- STAGGERED ANIMATION FIX ---
-        .animate(delay: Duration(milliseconds: (i % 15) * 80))
-        .slideX(
-          begin: 0.1,
-          end: 0,
-          duration: 600.ms,
-          curve: Curves.easeOutCubic
-        )
-        .fadeIn(duration: 600.ms);
+        return _wrapAnim(
+          EpisodeRowCard(
+            epNum: _displayChapter(_episodes[i]),
+            isDownloadMode: _isDownloadMode,
+            isManga: widget.anime.isManga,
+            onTap: () => _handleItemTap(_episodes[i]),
+          ),
+          i
+        );
       },
     );
   }
@@ -2944,6 +3179,7 @@ class _EpisodeRowCardState extends State<EpisodeRowCard> with AutomaticKeepAlive
   @override
   Widget build(BuildContext context) {
     super.build(context); // Required by Mixin
+    final tier = context.read<SettingsProvider>().tier;
 
     return MouseRegion(
       onEnter: (_) => setState(() => isHovered = true),
@@ -2952,11 +3188,11 @@ class _EpisodeRowCardState extends State<EpisodeRowCard> with AutomaticKeepAlive
       child: GestureDetector(
         onTap: widget.onTap,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
+          duration: tier == PerformanceTier.low ? Duration.zero : const Duration(milliseconds: 200),
           curve: Curves.easeOut,
           margin: const EdgeInsets.only(bottom: 12),
           height: 70, // Fixed height for consistency
-          transform: Matrix4.identity()..scale(isHovered ? 1.01 : 1.0),
+          transform: Matrix4.identity()..scale(isHovered && tier != PerformanceTier.low ? 1.01 : 1.0),
           child: LiquidGlassContainer(
             opacity: isHovered ? 0.9 : 0.6,
             // Highlight color when downloading
@@ -3042,6 +3278,20 @@ class MorphingDownloadButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tier = context.read<SettingsProvider>().tier;
+
+    if (tier == PerformanceTier.low) {
+      // Simplified version for low performance
+      return IconButton(
+        onPressed: onToggle,
+        icon: Icon(
+          isDownloading ? LucideIcons.check : LucideIcons.download,
+          color: kColorCoral,
+        ),
+        style: IconButton.styleFrom(backgroundColor: Colors.white),
+      );
+    }
+
     return TweenAnimationBuilder<double>(
       duration: const Duration(milliseconds: 600),
       curve: Curves.easeOutBack,
@@ -3350,6 +3600,13 @@ class AnimeGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isMobile = MediaQuery.of(context).size.width < 900;
+    final tier = context.watch<SettingsProvider>().tier;
+
+    Widget adaptAnimate(Widget child, int index) {
+      if (tier == PerformanceTier.low) return child;
+      if (tier == PerformanceTier.mid) return child.animate(delay: (index * 20).ms).fadeIn();
+      return child.animate(delay: (index * 50).ms).scale(begin: const Offset(0.8, 0.8), curve: Curves.easeOutBack, duration: 400.ms).fadeIn(duration: 300.ms);
+    }
 
     return Padding(
       padding: EdgeInsets.symmetric(horizontal: isMobile ? 20 : 40),
@@ -3365,18 +3622,14 @@ class AnimeGrid extends StatelessWidget {
         itemCount: animes.length,
         itemBuilder: (ctx, i) {
           final tag = "${tagPrefix}_${animes[i].id}";
-          return AnimeCard(
-            anime: animes[i],
-            heroTag: tag,
-            onTap: () => onTap(animes[i], tag),
-          )
-          .animate(delay: (i * 50).ms)
-          .scale(
-            begin: const Offset(0.8, 0.8),
-            curve: Curves.easeOutBack,
-            duration: 400.ms,
-          )
-          .fadeIn(duration: 300.ms);
+          return adaptAnimate(
+            AnimeCard(
+              anime: animes[i],
+              heroTag: tag,
+              onTap: () => onTap(animes[i], tag),
+            ),
+            i
+          );
         },
       ),
     );
@@ -3404,6 +3657,10 @@ class _AnimeCardState extends State<AnimeCard> {
 
   @override
   Widget build(BuildContext context) {
+    final tier = context.watch<SettingsProvider>().tier;
+    // Disable hover scale on low tier
+    final scale = (isHovered && tier != PerformanceTier.low) ? 1.05 : 1.0;
+
     return MouseRegion(
       onEnter: (_) => setState(() => isHovered = true),
       onExit: (_) => setState(() => isHovered = false),
@@ -3412,7 +3669,7 @@ class _AnimeCardState extends State<AnimeCard> {
         onTap: widget.onTap,
         child: AnimatedContainer(
           duration: 200.ms,
-          transform: Matrix4.identity()..scale(isHovered ? 1.05 : 1.0),
+          transform: Matrix4.identity()..scale(scale),
           child: Stack(
             fit: StackFit.expand,
             children: [
@@ -3487,6 +3744,9 @@ class _HistoryCardState extends State<HistoryCard> {
 
   @override
   Widget build(BuildContext context) {
+    final tier = context.watch<SettingsProvider>().tier;
+    final scale = (isHovered && tier != PerformanceTier.low) ? 1.02 : 1.0;
+
     return MouseRegion(
       onEnter: (_) => setState(() => isHovered = true),
       onExit: (_) => setState(() => isHovered = false),
@@ -3498,7 +3758,7 @@ class _HistoryCardState extends State<HistoryCard> {
           curve: Curves.easeOut,
           margin: const EdgeInsets.only(bottom: 15),
           height: 90,
-          transform: Matrix4.identity()..scale(isHovered ? 1.02 : 1.0),
+          transform: Matrix4.identity()..scale(scale),
           child: LiquidGlassContainer(
             opacity: isHovered ? 0.9 : 0.6,
             child: Row(
@@ -3565,6 +3825,14 @@ class FeaturedCarousel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tier = context.watch<SettingsProvider>().tier;
+
+    Widget adaptAnimate(Widget child, int index) {
+      if (tier == PerformanceTier.low) return child;
+      if (tier == PerformanceTier.mid) return child.animate(delay: (index * 50).ms).fadeIn();
+      return child.animate(delay: (index * 100).ms).slideX(begin: 0.2, end: 0, curve: Curves.easeOut).fadeIn();
+    }
+
     return SizedBox(
       height: 220,
       child: ListView.builder(
@@ -3575,82 +3843,87 @@ class FeaturedCarousel extends StatelessWidget {
           final anime = animes[index];
           final tag = "carousel_${anime.id}";
 
-          return GestureDetector(
-            onTap: () => onTap(anime, tag),
-            child: Container(
-              width: 300,
-              margin: const EdgeInsets.only(right: 20),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(20),
-                boxShadow: [
-                  BoxShadow(
-                    color: kColorCoral.withOpacity(0.2),
-                    blurRadius: 15,
-                    offset: const Offset(0, 8),
-                  )
-                ],
-              ),
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  CozyHeroImage(
-                    heroTag: tag,
-                    imageUrl: anime.fullImageUrl,
-                    radius: 20,
-                  ),
-                  Container(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(20),
-                      gradient: LinearGradient(
-                        colors: [Colors.transparent, kColorDarkText.withOpacity(0.9)],
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
+          return adaptAnimate(
+            GestureDetector(
+              onTap: () => onTap(anime, tag),
+              child: Container(
+                width: 300,
+                margin: const EdgeInsets.only(right: 20),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: tier != PerformanceTier.low
+                  ? [
+                    BoxShadow(
+                      color: kColorCoral.withOpacity(0.2),
+                      blurRadius: 15,
+                      offset: const Offset(0, 8),
+                    )
+                  ]
+                  : [],
+                ),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    CozyHeroImage(
+                      heroTag: tag,
+                      imageUrl: anime.fullImageUrl,
+                      radius: 20,
+                    ),
+                    Container(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(20),
+                        gradient: LinearGradient(
+                          colors: [Colors.transparent, kColorDarkText.withOpacity(0.9)],
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                        ),
                       ),
                     ),
-                  ),
-                  Positioned(
-                    bottom: 20,
-                    left: 20,
-                    child: SizedBox(
-                      width: 260,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: kColorCoral,
-                              borderRadius: BorderRadius.circular(8),
+                    Positioned(
+                      bottom: 20,
+                      left: 20,
+                      child: SizedBox(
+                        width: 260,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: kColorCoral,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: const Text(
+                                "HOT",
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                             ),
-                            child: const Text(
-                              "HOT",
-                              style: TextStyle(
+                            const SizedBox(height: 5),
+                            Text(
+                              anime.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.inter(
                                 color: Colors.white,
-                                fontSize: 10,
+                                fontSize: 18,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
-                          ),
-                          const SizedBox(height: 5),
-                          Text(
-                            anime.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: GoogleFonts.inter(
-                              color: Colors.white,
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ).animate().slideX(begin: 0.2, end: 0, delay: (index * 100).ms, curve: Curves.easeOut);
+            index
+          );
         },
       ),
     );
