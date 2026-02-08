@@ -25,8 +25,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 // --- APP CONSTANTS ---
-const String kAppVersion = "1.7.5";
-const String kBuildNumber = "175";
+const String kAppVersion = "1.7.6"; // Bumped version for fix
+const String kBuildNumber = "176";
 
 // --- THEME COLORS ---
 const kColorCream = Color(0xFFFEEAC9);
@@ -103,7 +103,6 @@ class MemoryUtils {
       if (Platform.isLinux) {
         final result = await Process.run('grep', ['MemTotal', '/proc/meminfo']);
         if (result.stdout.toString().isNotEmpty) {
-          // Output format: MemTotal:        16303032 kB
           final parts = result.stdout.toString().trim().split(RegExp(r'\s+'));
           if (parts.length >= 2) {
             final kb = int.tryParse(parts[1]);
@@ -112,7 +111,6 @@ class MemoryUtils {
         }
       } else if (Platform.isWindows) {
         final result = await Process.run('wmic', ['computersystem', 'get', 'totalphysicalmemory']);
-        // Output: TotalPhysicalMemory \n 34359738368
         final lines = result.stdout.toString().trim().split('\n');
         if (lines.length >= 2) {
           final bytes = int.tryParse(lines[1].trim());
@@ -126,7 +124,6 @@ class MemoryUtils {
     } catch (e) {
       debugPrint("RAM Detection failed: $e");
     }
-    // Fallback for Mobile (Assume "Mid" tier ~6GB as safe default if unknown)
     return -1;
   }
 }
@@ -162,7 +159,6 @@ class SettingsProvider extends ChangeNotifier {
   }
 
   Future<void> initPerformanceMode() async {
-    // Detect RAM once
     if (_detectedRamGB == -1) {
       _detectedRamGB = await MemoryUtils.getTotalRamGB();
     }
@@ -178,10 +174,7 @@ class SettingsProvider extends ChangeNotifier {
     } else if (_perfMode == PerformanceMode.bestPerformance) {
       _currentTier = PerformanceTier.low;
     } else {
-      // AUTO MODE
       if (_detectedRamGB == -1) {
-        // Fallback if detection failed:
-        // Desktop usually handles High, Mobile usually Mid.
         if (Platform.isAndroid || Platform.isIOS) {
           _currentTier = PerformanceTier.mid;
         } else {
@@ -272,8 +265,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Onboarding always looks best, we don't downgrade this one-time screen
-    // unless strictly necessary, but sticking to design.
     return Scaffold(
       body: Container(
         decoration: const BoxDecoration(
@@ -410,10 +401,8 @@ class FloatingOrbsBackground extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Check performance tier
     final tier = context.select<SettingsProvider, PerformanceTier>((p) => p.tier);
 
-    // Low Tier: Disable floating animation, just return a static gradient or simple container
     if (tier == PerformanceTier.low) {
       return Container(color: Colors.transparent);
     }
@@ -539,7 +528,6 @@ class UpdaterService {
     }
   }
 
-  // Silent check for startup
   static Future<void> checkSilent(BuildContext context) async {
     try {
       final response = await http.get(Uri.parse(_releaseUrl));
@@ -559,7 +547,7 @@ class UpdaterService {
               backgroundColor: kColorCoral,
               duration: const Duration(seconds: 10),
               action: SnackBarAction(
-                label: "Update", // Triggers internal dialog
+                label: "Update",
                 textColor: Colors.white,
                 onPressed: () => _showCozyUpdateDialog(context, remoteTag, body, assets),
               ),
@@ -693,7 +681,6 @@ class UpdaterService {
     String? downloadUrl;
     String fileName = "";
 
-    // Platform Specific Asset Matching
     if (Platform.isAndroid) {
       var status = await Permission.storage.status;
       if (!status.isGranted) {
@@ -742,7 +729,6 @@ class UpdaterService {
 
     if (!context.mounted) return;
 
-    // Show Custom Download Dialog
     final File? downloadedFile = await showDialog<File?>(
       context: context,
       barrierDismissible: false,
@@ -755,7 +741,6 @@ class UpdaterService {
     if (downloadedFile != null) {
       if (Platform.isAndroid) {
         final result = await OpenFile.open(downloadedFile.path, type: "application/vnd.android.package-archive");
-
         if (result.type != ResultType.done) {
           if (context.mounted) {
             ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Install Error: ${result.message}")));
@@ -763,7 +748,6 @@ class UpdaterService {
         }
       } else {
         if (Platform.isWindows || Platform.isLinux) {
-          // Open the directory so user can extract/run
           await launchUrl(Uri.directory(downloadedFile.parent.path));
           if (context.mounted) {
             ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -775,7 +759,6 @@ class UpdaterService {
   }
 }
 
-// --- SMOOTH DOWNLOAD DIALOG ---
 class UpdateDownloadingDialog extends StatefulWidget {
   final String downloadUrl;
   final String fileName;
@@ -1023,11 +1006,9 @@ class LiquidGlassContainer extends StatelessWidget {
     final rRadius = borderRadius ?? BorderRadius.circular(20);
     final tier = context.select<SettingsProvider, PerformanceTier>((p) => p.tier);
 
-    // PERFORMANCE: Low Tier disables blur to save GPU
     if (tier == PerformanceTier.low) {
       return Container(
         decoration: BoxDecoration(
-          // Solid-ish background instead of blur
           color: Colors.white.withOpacity(0.9),
           borderRadius: rRadius,
           border: border ?? Border.all(color: Colors.black12, width: 1.0),
@@ -1080,7 +1061,6 @@ class CozyHeroImage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tier = context.select<SettingsProvider, PerformanceTier>((p) => p.tier);
-    // Low tier removes shadow calculation
     final showShadow = withShadow && tier != PerformanceTier.low;
 
     return Hero(
@@ -1151,12 +1131,10 @@ class _LiveGradientBackgroundState extends State<LiveGradientBackground> with Si
   }
 
   void _checkPerformance() {
-    // We can't access context in initState directly easily without a delay or didChangeDependencies
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final tier = context.read<SettingsProvider>().tier;
       if (tier == PerformanceTier.low) {
-        // Stop animation for low end devices
         if (_controller.isAnimating) _controller.stop();
       } else {
         if (!_controller.isAnimating) _controller.repeat(reverse: true);
@@ -1220,10 +1198,8 @@ class _MainScreenState extends State<MainScreen> {
         pageBuilder: (context, animation, secondaryAnimation) => AnimeDetailView(anime: anime, heroTag: heroTag),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           final tier = context.read<SettingsProvider>().tier;
-          // Simplify transition for lower tiers
           if (tier == PerformanceTier.low) return child;
           if (tier == PerformanceTier.mid) return FadeTransition(opacity: animation, child: child);
-
           return FadeTransition(opacity: animation, child: child);
         },
         transitionDuration: const Duration(milliseconds: 600),
@@ -1234,7 +1210,6 @@ class _MainScreenState extends State<MainScreen> {
   @override
   void initState() {
     super.initState();
-    // Check for updates silently on startup
     UpdaterService.checkSilent(context);
   }
 
@@ -1283,7 +1258,7 @@ class _MainScreenState extends State<MainScreen> {
                         position: Tween<Offset>(begin: const Offset(0.05, 0), end: Offset.zero).animate(animation),
                         child: child,
                       )
-                      : child, // Mid tier just fades
+                      : child,
                     );
                   },
                   child: KeyedSubtree(key: activeKey, child: activePage),
@@ -1417,7 +1392,6 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
     final currentIndex = widget.allChapters.indexOf(widget.chapterNum);
     final hasNext = currentIndex > 0;
     final hasPrev = currentIndex < widget.allChapters.length - 1;
-
     final bool enableScaling = _isCtrlPressed || _pointerCount > 1;
 
     return Scaffold(
@@ -1427,7 +1401,6 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
         onKeyEvent: _handleKey,
         child: Stack(
           children: [
-            // MAIN READER AREA
             Listener(
               onPointerDown: (_) => setState(() => _pointerCount++),
               onPointerUp: (_) => setState(() => _pointerCount--),
@@ -1504,8 +1477,8 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
                         );
                       }
                       return GestureDetector(
-                        onLongPress: () => _downloadImage(_pages[index], index + 1), // Mobile
-                        onSecondaryTap: () => _downloadImage(_pages[index], index + 1), // PC
+                        onLongPress: () => _downloadImage(_pages[index], index + 1),
+                        onSecondaryTap: () => _downloadImage(_pages[index], index + 1),
                         child: Container(
                           alignment: Alignment.center,
                           color: Colors.black,
@@ -1985,7 +1958,7 @@ class _CenterPlayButtonState extends State<CenterPlayButton> with TickerProvider
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if(!mounted) return;
       if (context.read<SettingsProvider>().tier == PerformanceTier.low) {
-        _pulseCtrl.stop(); // Disable pulse on low end
+        _pulseCtrl.stop();
       } else {
         if(!widget.isPlaying) _pulseCtrl.repeat();
       }
@@ -2092,8 +2065,6 @@ class _BrowseViewState extends State<BrowseView> with AutomaticKeepAliveClientMi
   List<AnimeModel> _items = [];
   bool _isLoading = true;
   String _currentQuery = "";
-
-  // -- MANGA TOGGLE --
   bool _isMangaMode = false;
 
   @override
@@ -2153,7 +2124,7 @@ class _BrowseViewState extends State<BrowseView> with AutomaticKeepAliveClientMi
     final isMobile = MediaQuery.of(context).size.width < 900;
     final tier = context.watch<SettingsProvider>().tier;
 
-    // Helper to reduce code duplication for animations
+    // FIX: Only apply delay to initial items to avoid scroll popping issues
     Widget animate(Widget child, {bool delay = false}) {
       if (tier == PerformanceTier.low) return child;
       if (tier == PerformanceTier.mid) return child.animate(delay: delay ? 200.ms : 0.ms).fadeIn();
@@ -2165,7 +2136,6 @@ class _BrowseViewState extends State<BrowseView> with AutomaticKeepAliveClientMi
       children: [
         const SizedBox(height: 50),
 
-        // --- TOGGLE BUTTONS ---
         Padding(
           padding: EdgeInsets.symmetric(horizontal: isMobile ? 20 : 40),
           child: Row(
@@ -2336,11 +2306,14 @@ class _HistoryViewState extends State<HistoryView> with AutomaticKeepAliveClient
     final isMobile = MediaQuery.of(context).size.width < 900;
     final tier = context.watch<SettingsProvider>().tier;
 
-    // Performance wrapper
+    // FIX: Clamped Delay Logic
+    // Only animate the first few items.
     Widget adaptAnimate(Widget child, {int index = 0}) {
       if (tier == PerformanceTier.low) return child;
-      if (tier == PerformanceTier.mid) return child.animate(delay: (index * 50).ms).fadeIn(duration: 300.ms);
-      return child.animate(delay: (index * 50).ms).slideX(begin: 0.2, end: 0, curve: Curves.easeOutCubic, duration: 400.ms).fadeIn(duration: 400.ms);
+      final int effectiveDelay = index > 8 ? 0 : index * 50;
+
+      if (tier == PerformanceTier.mid) return child.animate(delay: effectiveDelay.ms).fadeIn(duration: 300.ms);
+      return child.animate(delay: effectiveDelay.ms).slideX(begin: 0.2, end: 0, curve: Curves.easeOutCubic, duration: 400.ms).fadeIn(duration: 400.ms);
     }
 
     return Column(
@@ -2466,11 +2439,12 @@ class _SettingsViewState extends State<SettingsView> {
     final settingsProvider = context.watch<SettingsProvider>();
     final tier = settingsProvider.tier;
 
-    // Performance Wrapper
     Widget animate(Widget child, int index) {
       if (tier == PerformanceTier.low) return child;
-      if (tier == PerformanceTier.mid) return child.animate(delay: (index * 50).ms).fadeIn();
-      return child.animate(delay: (index * 50).ms).slideX(begin: 0.2, end: 0, curve: Curves.easeOutCubic, duration: 400.ms).fadeIn();
+      // FIX: Small fixed delay for list items here is fine since list is short
+      final effectiveDelay = index * 50;
+      if (tier == PerformanceTier.mid) return child.animate(delay: effectiveDelay.ms).fadeIn();
+      return child.animate(delay: effectiveDelay.ms).slideX(begin: 0.2, end: 0, curve: Curves.easeOutCubic, duration: 400.ms).fadeIn();
     }
 
     final List<Widget> settingsItems = [
@@ -2759,21 +2733,19 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
   }
 
   Future<void> _handleItemTap(String idNum) async {
-    // --- MANGA LOGIC ---
     if (widget.anime.isManga) {
       context.read<UserProvider>().addToHistory(widget.anime, idNum);
       Navigator.push(
         context,
         MaterialPageRoute(
           builder: (ctx) => MangaReaderScreen(
-            anime: widget.anime, // Pass full object for history to work on next/prev
+            anime: widget.anime,
             chapterNum: idNum,
             allChapters: _episodes,
           )));
       return;
     }
 
-    // --- ANIME LOGIC ---
     if (_isDownloadMode) {
       if (Platform.isAndroid || Platform.isIOS) {
         if (mounted) {
@@ -2809,7 +2781,6 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
         final useInternal = context.read<SettingsProvider>().useInternalPlayer;
         final isDesktop = Platform.isLinux || Platform.isWindows || Platform.isMacOS;
 
-        // HELPER TO OPEN INTERNAL PLAYER
         void _openInternalPlayer() {
           Navigator.of(context).push(
             PageRouteBuilder(
@@ -2826,7 +2797,6 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
           );
         }
 
-        // DESKTOP SYSTEM MPV CHECK
         if (isDesktop && !useInternal) {
           final savedSeconds = context.read<ProgressProvider>().getProgress(widget.anime.id, idNum);
           bool shouldResume = false;
@@ -2862,17 +2832,14 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
           if (shouldResume) args.add('--start=$savedSeconds');
 
           try {
-            // Attempt to start system MPV
             await Process.start('mpv', args, mode: ProcessStartMode.detached);
           } catch (e) {
-            // FALLBACK TO INTERNAL IF MPV NOT FOUND
             debugPrint("System MPV failed: $e. Falling back to libmpv.");
             if (mounted) {
               _openInternalPlayer();
             }
           }
         } else {
-          // MOBILE OR INTERNAL MODE FORCED
           _openInternalPlayer();
         }
       } else {
@@ -2970,7 +2937,6 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
                   ),
               ]),
               const SizedBox(height: 20),
-              // CHANGED TO LIST WITH KEEPALIVE
               Expanded(child: _buildEpisodeList()),
             ]),
           ),
@@ -3099,12 +3065,17 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
     );
   }
 
-  // Animation wrapper
+  // FIX: Clamped delay logic here is crucial for long lists
   Widget _wrapAnim(Widget child, int index) {
     final tier = context.watch<SettingsProvider>().tier;
     if (tier == PerformanceTier.low) return child;
-    if (tier == PerformanceTier.mid) return child.animate(delay: (index % 15 * 50).ms).fadeIn();
-    return child.animate(delay: (index % 15 * 50).ms).slideX(begin: 0.1, end: 0, duration: 600.ms, curve: Curves.easeOutCubic).fadeIn(duration: 600.ms);
+
+    // IMPORTANT: If index > 8 (scrolled view), delay is 0.
+    // This fixes the "scroll fast -> wait -> double animation" bug.
+    final int effectiveDelay = index > 8 ? 0 : index * 50;
+
+    if (tier == PerformanceTier.mid) return child.animate(delay: effectiveDelay.ms).fadeIn();
+    return child.animate(delay: effectiveDelay.ms).slideX(begin: 0.1, end: 0, duration: 600.ms, curve: Curves.easeOutCubic).fadeIn(duration: 600.ms);
   }
 
   String _displayChapter(String raw) {
@@ -3112,13 +3083,11 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
     return raw;
   }
 
-  // REPLACED GRID WITH LISTVIEW
   Widget _buildEpisodeList() {
     return _isLoading
     ? const Center(child: CircularProgressIndicator(color: kColorCoral))
     : ListView.builder(
       physics: const BouncingScrollPhysics(),
-      // Important for keep-alive performance
       addAutomaticKeepAlives: true,
       itemCount: _episodes.length,
       itemBuilder: (ctx, i) {
@@ -3149,7 +3118,6 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
   }
 }
 
-// NEW: REPLACES EPISODE CHIP WITH ROW CARD + KEEPALIVE
 class EpisodeRowCard extends StatefulWidget {
   final String epNum;
   final bool isDownloadMode;
@@ -3171,14 +3139,12 @@ class EpisodeRowCard extends StatefulWidget {
 class _EpisodeRowCardState extends State<EpisodeRowCard> with AutomaticKeepAliveClientMixin {
   bool isHovered = false;
 
-  // This ensures the widget stays in memory when scrolled off-screen,
-  // preventing the animation from re-playing and causing bugs.
   @override
   bool get wantKeepAlive => true;
 
   @override
   Widget build(BuildContext context) {
-    super.build(context); // Required by Mixin
+    super.build(context);
     final tier = context.read<SettingsProvider>().tier;
 
     return MouseRegion(
@@ -3191,11 +3157,10 @@ class _EpisodeRowCardState extends State<EpisodeRowCard> with AutomaticKeepAlive
           duration: tier == PerformanceTier.low ? Duration.zero : const Duration(milliseconds: 200),
           curve: Curves.easeOut,
           margin: const EdgeInsets.only(bottom: 12),
-          height: 70, // Fixed height for consistency
+          height: 70,
           transform: Matrix4.identity()..scale(isHovered && tier != PerformanceTier.low ? 1.01 : 1.0),
           child: LiquidGlassContainer(
             opacity: isHovered ? 0.9 : 0.6,
-            // Highlight color when downloading
             child: Container(
               decoration: widget.isDownloadMode && isHovered
               ? BoxDecoration(
@@ -3205,7 +3170,6 @@ class _EpisodeRowCardState extends State<EpisodeRowCard> with AutomaticKeepAlive
               padding: const EdgeInsets.symmetric(horizontal: 20),
               child: Row(
                 children: [
-                  // Number Badge
                   Container(
                     width: 40,
                     height: 40,
@@ -3224,7 +3188,6 @@ class _EpisodeRowCardState extends State<EpisodeRowCard> with AutomaticKeepAlive
                     ),
                   ),
                   const SizedBox(width: 20),
-                  // Title Text
                   Expanded(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -3248,7 +3211,6 @@ class _EpisodeRowCardState extends State<EpisodeRowCard> with AutomaticKeepAlive
                       ],
                     ),
                   ),
-                  // Icon
                   Icon(
                     widget.isDownloadMode
                     ? LucideIcons.download
@@ -3281,7 +3243,6 @@ class MorphingDownloadButton extends StatelessWidget {
     final tier = context.read<SettingsProvider>().tier;
 
     if (tier == PerformanceTier.low) {
-      // Simplified version for low performance
       return IconButton(
         onPressed: onToggle,
         icon: Icon(
@@ -3602,10 +3563,14 @@ class AnimeGrid extends StatelessWidget {
     final isMobile = MediaQuery.of(context).size.width < 900;
     final tier = context.watch<SettingsProvider>().tier;
 
+    // FIX: Clamped Delay for grids too
     Widget adaptAnimate(Widget child, int index) {
       if (tier == PerformanceTier.low) return child;
-      if (tier == PerformanceTier.mid) return child.animate(delay: (index * 20).ms).fadeIn();
-      return child.animate(delay: (index * 50).ms).scale(begin: const Offset(0.8, 0.8), curve: Curves.easeOutBack, duration: 400.ms).fadeIn(duration: 300.ms);
+      // Clamp at index 8. Anything after is scrolled to, so show instant.
+      final int effectiveDelay = index > 8 ? 0 : index * 50;
+
+      if (tier == PerformanceTier.mid) return child.animate(delay: effectiveDelay.ms).fadeIn();
+      return child.animate(delay: effectiveDelay.ms).scale(begin: const Offset(0.8, 0.8), curve: Curves.easeOutBack, duration: 400.ms).fadeIn(duration: 300.ms);
     }
 
     return Padding(
@@ -3658,7 +3623,6 @@ class _AnimeCardState extends State<AnimeCard> {
   @override
   Widget build(BuildContext context) {
     final tier = context.watch<SettingsProvider>().tier;
-    // Disable hover scale on low tier
     final scale = (isHovered && tier != PerformanceTier.low) ? 1.05 : 1.0;
 
     return MouseRegion(
