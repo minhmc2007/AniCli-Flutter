@@ -1,3 +1,4 @@
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -25,8 +26,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 // --- APP CONSTANTS ---
-const String kAppVersion = "1.7.6"; // Bumped version for fix
-const String kBuildNumber = "176";
+const String kAppVersion = "1.7.7"; // Bumped version for animation fix
+const String kBuildNumber = "177";
 
 // --- THEME COLORS ---
 const kColorCream = Color(0xFFFEEAC9);
@@ -3566,8 +3567,9 @@ class AnimeGrid extends StatelessWidget {
     // FIX: Clamped Delay for grids too
     Widget adaptAnimate(Widget child, int index) {
       if (tier == PerformanceTier.low) return child;
-      // Clamp at index 8. Anything after is scrolled to, so show instant.
-      final int effectiveDelay = index > 8 ? 0 : index * 50;
+
+      // FIX: Removed clamp so animation continues for all items as requested
+      final int effectiveDelay = index * 50;
 
       if (tier == PerformanceTier.mid) return child.animate(delay: effectiveDelay.ms).fadeIn();
       return child.animate(delay: effectiveDelay.ms).scale(begin: const Offset(0.8, 0.8), curve: Curves.easeOutBack, duration: 400.ms).fadeIn(duration: 300.ms);
