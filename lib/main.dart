@@ -5,6 +5,8 @@ import 'dart:io';
 import 'dart:ui';
 import 'dart:math' as math;
 import 'package:animeclient/api/ani_core.dart';
+import 'package:animeclient/api/anime_source.dart';
+import 'package:animeclient/api/vi_anime_core.dart';
 import 'package:animeclient/user_provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:file_picker/file_picker.dart';
@@ -26,7 +28,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 // --- APP CONSTANTS ---
-const String kAppVersion = "1.7.7"; // Bumped version for animation fix
+const String kAppVersion = "1.7.7";
 const String kBuildNumber = "177";
 
 // --- THEME COLORS ---
@@ -49,6 +51,7 @@ Future<void> main() async {
       providers: [
         ChangeNotifierProvider(create: (_) => UserProvider()),
         ChangeNotifierProvider(create: (_) => SettingsProvider()),
+        ChangeNotifierProvider(create: (_) => SourceProvider()),
         ChangeNotifierProvider(create: (_) => ProgressProvider()),
       ],
       child: AniCliApp(isFirstLaunch: isFirstLaunch),
@@ -254,7 +257,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     if (mounted) {
       Navigator.of(context).pushReplacement(
         PageRouteBuilder(
-          pageBuilder: (_, __, ___) => const MainScreen(),
+          pageBuilder: (_, __, ___) => const SourceSelectScreen(),
           transitionsBuilder: (_, anim, __, child) {
             return FadeTransition(opacity: anim, child: child);
           },
@@ -393,6 +396,161 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           ),
         ),
       ],
+    );
+  }
+}
+
+// ==========================================
+//      SOURCE SELECT SCREEN (after OOBE)
+// ==========================================
+class SourceSelectScreen extends StatelessWidget {
+  const SourceSelectScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xFFFFF8F0), Color(0xFFFEEAC9)],
+          ),
+        ),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            const FloatingOrbsBackground(),
+            SafeArea(
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 32),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        "Choose Anime Source",
+                        style: GoogleFonts.outfit(
+                          fontSize: 32,
+                          fontWeight: FontWeight.bold,
+                          color: kColorDarkText,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        "Select your preferred anime content language",
+                        style: GoogleFonts.inter(
+                          fontSize: 16,
+                          color: kColorDarkText.withOpacity(0.7),
+                        ),
+                      ),
+                      const SizedBox(height: 40),
+                      _SourceOption(
+                        title: "English",
+                        subtitle: "AllAnime · Sub",
+                        flag: "🇺🇸",
+                        onTap: () async => _selectAndGo(context, AnimeSource.en),
+                      ),
+                      const SizedBox(height: 16),
+                      _SourceOption(
+                        title: "Tiếng Việt",
+                        subtitle: "PhimAPI · Vietsub",
+                        flag: "🇻🇳",
+                        onTap: () async => _selectAndGo(context, AnimeSource.vi),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _selectAndGo(BuildContext context, AnimeSource source) async {
+    await context.read<SourceProvider>().setSource(source);
+    if (!context.mounted) return;
+    Navigator.of(context).pushReplacement(
+      PageRouteBuilder(
+        pageBuilder: (_, __, ___) => const MainScreen(),
+        transitionsBuilder: (_, anim, __, child) {
+          return FadeTransition(opacity: anim, child: child);
+        },
+        transitionDuration: const Duration(milliseconds: 600),
+      ),
+    );
+  }
+}
+
+class _SourceOption extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final String flag;
+  final VoidCallback onTap;
+
+  const _SourceOption({
+    required this.title,
+    required this.subtitle,
+    required this.flag,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(20),
+        child: LiquidGlassContainer(
+          borderRadius: BorderRadius.circular(20),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+            child: Row(
+              children: [
+                Container(
+                  width: 56,
+                  height: 56,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: kColorCoral.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Text(flag, style: const TextStyle(fontSize: 28)),
+                ),
+                const SizedBox(width: 20),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: GoogleFonts.inter(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: kColorDarkText,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        subtitle,
+                        style: GoogleFonts.inter(
+                          fontSize: 14,
+                          color: kColorCoral,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Icon(LucideIcons.chevronRight, color: kColorCoral),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -1188,7 +1346,6 @@ class MainScreen extends StatefulWidget {
 class _MainScreenState extends State<MainScreen> {
   int _selectedIndex = 0;
 
-  final GlobalKey<_BrowseViewState> _browseKey = GlobalKey();
   final GlobalKey<_HistoryViewState> _historyKey = GlobalKey();
   final GlobalKey<_FavoritesViewState> _favKey = GlobalKey();
   final GlobalKey<_SettingsViewState> _settingsKey = GlobalKey();
@@ -1221,8 +1378,9 @@ class _MainScreenState extends State<MainScreen> {
 
     switch (_selectedIndex) {
       case 0:
-        activePage = BrowseView(key: _browseKey, onAnimeTap: _openDetail);
-        activeKey = const ValueKey("BrowseTab");
+        final src = context.watch<SourceProvider>().source;
+        activePage = BrowseView(key: ValueKey("Browse_${src.name}"), onAnimeTap: _openDetail);
+        activeKey = ValueKey("BrowseTab_${src.name}");
         break;
       case 1:
         activePage = HistoryView(key: _historyKey, onAnimeTap: _openDetail);
@@ -1549,6 +1707,7 @@ class InternalPlayerScreen extends StatefulWidget {
   final String title;
   final String animeId;
   final String epNum;
+  final String referer;
 
   const InternalPlayerScreen({
     super.key,
@@ -1556,6 +1715,7 @@ class InternalPlayerScreen extends StatefulWidget {
     required this.title,
     required this.animeId,
     required this.epNum,
+    this.referer = '',
   });
 
   @override
@@ -1592,7 +1752,8 @@ class _InternalPlayerScreenState extends State<InternalPlayerScreen> {
       }
     });
 
-    player.open(Media(widget.streamUrl, httpHeaders: {'Referer': AniCore.referer}));
+    final referer = widget.referer.isNotEmpty ? widget.referer : AniCore.referer;
+    player.open(Media(widget.streamUrl, httpHeaders: {'Referer': referer}));
     _progressTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       if (!mounted) return;
       final pos = player.state.position.inSeconds;
@@ -2088,10 +2249,15 @@ class _BrowseViewState extends State<BrowseView> with AutomaticKeepAliveClientMi
         results = await MangaCore.search(_currentQuery);
       }
     } else {
+      final useVi = context.read<SourceProvider>().isVi;
       if (_currentQuery.isEmpty) {
-        results = await AniCore.getTrending();
+        results = useVi
+            ? await ViAnimeCore.getTrending()
+            : await AniCore.getTrending();
       } else {
-        results = await AniCore.search(_currentQuery);
+        results = useVi
+            ? await ViAnimeCore.search(_currentQuery)
+            : await AniCore.search(_currentQuery);
       }
     }
 
@@ -2448,7 +2614,43 @@ class _SettingsViewState extends State<SettingsView> {
       return child.animate(delay: effectiveDelay.ms).slideX(begin: 0.2, end: 0, curve: Curves.easeOutCubic, duration: 400.ms).fadeIn();
     }
 
+    final sourceProvider = context.watch<SourceProvider>();
+
     final List<Widget> settingsItems = [
+      _buildSectionTitle("Content"),
+      LiquidGlassContainer(
+        opacity: 0.6,
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(LucideIcons.globe, color: kColorCoral),
+                  const SizedBox(width: 10),
+                  const Text("Anime Source", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                ],
+              ),
+              const SizedBox(height: 10),
+              DropdownButton<AnimeSource>(
+                value: sourceProvider.source,
+                isExpanded: true,
+                dropdownColor: kColorCream,
+                underline: Container(height: 1, color: kColorCoral),
+                items: const [
+                  DropdownMenuItem(value: AnimeSource.en, child: Text("English (AllAnime · Sub)")),
+                  DropdownMenuItem(value: AnimeSource.vi, child: Text("Tiếng Việt (PhimAPI · Vietsub)")),
+                ],
+                onChanged: (AnimeSource? newVal) {
+                  if (newVal != null) sourceProvider.setSource(newVal);
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+      const SizedBox(height: 15),
       _buildSectionTitle("General"),
       _buildSettingCard(
         icon: LucideIcons.downloadCloud,
@@ -2718,7 +2920,10 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
     if (widget.anime.isManga) {
       items = await MangaCore.getChapters(widget.anime.id);
     } else {
-      items = await AniCore.getEpisodes(widget.anime.id);
+      final useVi = widget.anime.sourceId == 'vi';
+      items = useVi
+          ? await ViAnimeCore.getEpisodes(widget.anime.id)
+          : await AniCore.getEpisodes(widget.anime.id);
     }
 
     if (mounted) {
@@ -2756,16 +2961,20 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
         return;
       }
       setState(() => _loadingStatus = "Preparing Download...");
-      final url = await AniCore.getStreamUrl(widget.anime.id, idNum);
+      final useVi = widget.anime.sourceId == 'vi';
+      final url = useVi
+          ? await ViAnimeCore.getStreamUrl(widget.anime.id, idNum)
+          : await AniCore.getStreamUrl(widget.anime.id, idNum);
       setState(() => _loadingStatus = null);
       if (url != null) {
         String safeName = "${widget.anime.name}-EP$idNum.mp4".replaceAll(RegExp(r'[<>:"/\\|?*]'), '');
 
         if (!mounted) return;
+        final referer = useVi ? ViAnimeCore.referer : AniCore.referer;
         await showDialog(
           context: context,
           barrierDismissible: false,
-          builder: (ctx) => EpisodeDownloadDialog(url: url, fileName: safeName),
+          builder: (ctx) => EpisodeDownloadDialog(url: url, fileName: safeName, referer: referer),
         );
       } else {
         if (mounted) {
@@ -2775,13 +2984,17 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
     } else {
       setState(() => _loadingStatus = "Fetching Stream...");
       context.read<UserProvider>().addToHistory(widget.anime, idNum);
-      final url = await AniCore.getStreamUrl(widget.anime.id, idNum);
+      final useVi = widget.anime.sourceId == 'vi';
+      final url = useVi
+          ? await ViAnimeCore.getStreamUrl(widget.anime.id, idNum)
+          : await AniCore.getStreamUrl(widget.anime.id, idNum);
       setState(() => _loadingStatus = null);
 
       if (url != null) {
         final useInternal = context.read<SettingsProvider>().useInternalPlayer;
         final isDesktop = Platform.isLinux || Platform.isWindows || Platform.isMacOS;
 
+        final referer = useVi ? ViAnimeCore.referer : AniCore.referer;
         void _openInternalPlayer() {
           Navigator.of(context).push(
             PageRouteBuilder(
@@ -2790,6 +3003,7 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
                 title: "${widget.anime.name} - Ep $idNum",
                 animeId: widget.anime.id,
                 epNum: idNum,
+                referer: referer,
               ),
               transitionsBuilder: (context, anim, secAnim, child) {
                 return FadeTransition(opacity: anim, child: child);
@@ -2826,7 +3040,7 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
 
           final List<String> args = [
             url,
-            '--http-header-fields=Referer: ${AniCore.referer}',
+            '--http-header-fields=Referer: $referer',
             '--force-media-title=${widget.anime.name} - Ep $idNum',
             '--save-position-on-quit',
           ];
@@ -3334,11 +3548,13 @@ class MorphingDownloadButton extends StatelessWidget {
 class EpisodeDownloadDialog extends StatefulWidget {
   final String url;
   final String fileName;
+  final String referer;
 
   const EpisodeDownloadDialog({
     super.key,
     required this.url,
     required this.fileName,
+    this.referer = '',
   });
 
   @override
@@ -3375,7 +3591,7 @@ class _EpisodeDownloadDialogState extends State<EpisodeDownloadDialog> {
 
       final file = File(savePath);
       final request = http.Request('GET', Uri.parse(widget.url));
-      request.headers['Referer'] = AniCore.referer;
+      request.headers['Referer'] = widget.referer.isNotEmpty ? widget.referer : AniCore.referer;
 
       final response = await _client.send(request);
 

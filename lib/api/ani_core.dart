@@ -254,12 +254,15 @@ class AnimeModel {
   final String name;
   final String? thumbnail;
   final bool isManga;
+  /// 'en' or 'vi' - which anime source this came from
+  final String sourceId;
 
   AnimeModel({
     required this.id,
     required this.name,
     this.thumbnail,
-    this.isManga = false
+    this.isManga = false,
+    this.sourceId = 'en',
   });
 
   factory AnimeModel.fromJson(Map<String, dynamic> json) {
@@ -268,6 +271,7 @@ class AnimeModel {
       name: json['name'] ?? 'Unknown',
       thumbnail: json['thumbnail'],
       isManga: json['isManga'] ?? false,
+      sourceId: json['sourceId'] ?? 'en',
     );
   }
 
@@ -309,6 +313,7 @@ class AnimeModel {
     'name': name,
     'thumbnail': thumbnail,
     'isManga': isManga,
+    'sourceId': sourceId,
   };
 
   String get fullImageUrl {
