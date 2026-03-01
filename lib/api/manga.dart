@@ -10,7 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 class AnimeModel {
   final String id;
   final String name;
-  String? thumbnail; // Mutable to allow resolving cover from first page
+  String? thumbnail;
   final bool isManga;
 
   /// 'en' | 'vi' | 'allanime' | 'mangadex'
@@ -64,17 +64,8 @@ class AnimeModel {
   String get fullImageUrl {
     if (thumbnail == null || thumbnail!.isEmpty) return 'https://via.placeholder.com/300x450';
       if (thumbnail!.startsWith('http')) return thumbnail!;
-      return 'https://allanime.day/$thumbnail';
-  }
-
-  /// Fixes the cover by fetching the first page of the first chapter
-  Future<void> resolveActualCover() async {
-    if (sourceId == 'allanime') {
-      final realCover = await AllMangaCore.getValidCoverUrl(id);
-      if (realCover != null) {
-        thumbnail = realCover;
-      }
-    }
+      // Fallback for any legacy data
+      return 'https://wp.youtube-anime.com/aln.youtube-anime.com/$thumbnail?w=250';
   }
 }
 
@@ -120,13 +111,11 @@ class MangaCore {
 
   static Future<List<AnimeModel>> getTrending() => search('');
 
-  // Helper to find a fallback cover for AllManga items
+  // Fallback: If AllManga image 404s, try finding a cover on MangaDex
   static Future<String?> findMangaDexCover(String title) async {
     try {
       final results = await search(title);
-      if (results.isNotEmpty) {
-        return results.first.fullImageUrl;
-      }
+      if (results.isNotEmpty) return results.first.fullImageUrl;
     } catch (_) {}
     return null;
   }
@@ -199,7 +188,8 @@ class AllMangaCore {
 
   static const String _apiUrl = 'https://api.allanime.day/api';
   static const String _imageServer = 'https://ytimgf.fast4speed.rsvp';
-  static const String _baseSiteUrl = 'https://allanime.day';
+  static const String _coverServer = 'https://wp.youtube-anime.com/aln.youtube-anime.com';
+
   static const String _referer = 'https://allmanga.to/';
   static const String _readerRef = 'https://youtu-chan.com/';
 
@@ -223,7 +213,10 @@ class AllMangaCore {
   static const Map<String, String> coverHeaders = {
     'Referer': 'https://allmanga.to/',
     'Origin': 'https://allmanga.to',
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
+    'sec-ch-ua': '"Not:A-Brand";v="99", "Google Chrome";v="145", "Chromium";v="145"',
+    'sec-ch-ua-mobile': '?0',
+    'sec-ch-ua-platform': '"Linux"',
   };
 
   static Future<List<AnimeModel>> search(String query) async {
@@ -255,8 +248,6 @@ class AllMangaCore {
       final detail = data['data']?['manga']?['availableChaptersDetail'];
       if (detail == null) return [];
       final List raw = (detail['sub'] ?? detail['raw'] ?? detail['dub'] ?? []) as List;
-      // Returns reversed (Ch 1 first) for sorting logic, but usually we want latest first for UI.
-      // Current implementation reverses it to be Latest -> Oldest.
       return raw.map((c) => c.toString()).toList().reversed.toList();
     } catch (e) {
       if (debugMode) print('AllManga Chapters Error: $e');
@@ -268,7 +259,6 @@ class AllMangaCore {
     final allUrls = <String>[];
     int offset = 0;
     const limit = 50;
-
     final cleanChapter = chapterString.contains('|') ? chapterString.split('|')[1].trim() : chapterString.trim();
 
     while (true) {
@@ -308,26 +298,6 @@ class AllMangaCore {
     return allUrls;
   }
 
-  /// UPDATED: Generates a cover URL by fetching the First Page of Chapter 1
-  /// instead of using the user's history. This ensures a generic/clean book cover.
-  static Future<String?> getValidCoverUrl(String mangaId) async {
-    // 1. Fetch all chapters
-    final chapters = await getChapters(mangaId);
-
-    if (chapters.isNotEmpty) {
-      // getChapters returns reversed list [Latest ... Ch1]
-      // We want the last element to get Chapter 1
-      final firstChapter = chapters.last;
-
-      // 2. Fetch pages for Chapter 1
-      final pages = await getPages(mangaId, firstChapter);
-
-      // 3. Return the first page (Usually Cover/Title Page)
-      if (pages.isNotEmpty) return pages.first;
-    }
-    return null;
-  }
-
   static Future<Map<String, dynamic>> _persistedGet(
     Map<String, dynamic> variables, String hash, {Map<String, String>? headers}) async {
       final extensions = {'persistedQuery': {'version': 1, 'sha256Hash': hash}};
@@ -346,7 +316,12 @@ class AllMangaCore {
     static AnimeModel _fromEdge(Map<String, dynamic> e) {
       String? thumb = e['thumbnail'] as String?;
       if (thumb != null && !thumb.startsWith('http')) {
-        thumb = '$_baseSiteUrl/${thumb.replaceFirst(RegExp(r'^/+'), '')}';
+        final cleanPath = thumb.replaceFirst(RegExp(r'^/+'), '');
+
+        // FIX: Force filename to 001.jpg/png to get the front cover
+        final adjustedPath = cleanPath.replaceFirst(RegExp(r'\d+(?=\.(jpg|png|webp))'), '001');
+
+        thumb = '$_coverServer/$adjustedPath?w=250';
       }
       return AnimeModel(
         id: e['_id'] ?? '',

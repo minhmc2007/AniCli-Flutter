@@ -25,8 +25,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 // --- APP CONSTANTS ---
-const String kAppVersion = "1.8.2";
-const String kBuildNumber = "182";
+const String kAppVersion = "1.8.0";
+const String kBuildNumber = "180";
 const kColorCream = Color(0xFFFEEAC9);
 const kColorPeach = Color(0xFFFFCDC9);
 const kColorSoftPink = Color(0xFFFDACAC);
@@ -88,7 +88,6 @@ class MemoryUtils {
 }
 
 extension AnimExt on Widget {
-  // General adapter for general widgets
   Widget adapt(PerformanceTier t, {int delay = 0, bool slideY = false, bool isScale = false, double slideBegin = 0.2, int duration = 400}) {
     if (t == PerformanceTier.low) return this;
     var a = animate(delay: delay.ms).fadeIn(duration: (duration == 600 ? 600 : 300).ms);
@@ -97,7 +96,6 @@ extension AnimExt on Widget {
     return slideY ? a.slideY(begin: slideBegin, end: 0, curve: Curves.easeOutCubic, duration: duration.ms) : a.slideX(begin: slideBegin, end: 0, curve: Curves.easeOutCubic, duration: duration.ms);
   }
 
-  // UPDATED: Simple top-to-bottom fade for lists (History/Episodes)
   Widget simpleDrop(PerformanceTier t, {int delay = 0}) {
     if (t == PerformanceTier.low) return this;
     return animate(delay: delay.ms)
@@ -314,7 +312,7 @@ class _CozyHeroImageState extends State<CozyHeroImage> {
 
   Map<String, String>? _getHeaders(String url) {
     if (url.contains('youtu-chan') || url.contains('fast4speed')) return AllMangaCore.pageHeaders;
-    else if (url.contains('allanime') || url.contains('allmanga')) return AllMangaCore.coverHeaders;
+    else if (url.contains('wp.youtube-anime.com') || url.contains('allanime') || url.contains('allmanga')) return AllMangaCore.coverHeaders;
     return null;
   }
 
@@ -458,9 +456,9 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
   Future<void> _loadPages() async {
     setState(() => _isLoading = true);
     final pages = widget.anime.sourceId == 'allanime'
-    ? await AllMangaCore.getPages(widget.anime.id, widget.chapterNum)
-    : await MangaCore.getPages(widget.chapterNum);
-    if (mounted) setState(() { _pages = pages; _isLoading = false; });
+? await AllMangaCore.getPages(widget.anime.id, widget.chapterNum)
+: await MangaCore.getPages(widget.chapterNum);
+if (mounted) setState(() { _pages = pages; _isLoading = false; });
   }
   void _nav(String newChap) {
     context.read<UserProvider>().addToHistory(widget.anime, newChap);
@@ -489,15 +487,15 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
           if (e is PointerScrollEvent) {
             if (_isCtrlPressed) {
               final scale = e.scrollDelta.dy < 0 ? 1.1 : 0.9; final currentMatrix = _tCtrl.value;
-              final newScale = (currentMatrix.getMaxScaleOnAxis() * scale).clamp(0.05, 10.0);
-              if (newScale >= 0.05 && newScale <= 10.0) {
+              final newScale = (currentMatrix.getMaxScaleOnAxis() * scale).clamp(0.01, 10.0);
+              if (newScale >= 0.01 && newScale <= 10.0) {
                 final c = Offset(MediaQuery.of(context).size.width/2, MediaQuery.of(context).size.height/2);
                 _tCtrl.value = (Matrix4.identity()..translate(c.dx, c.dy)..scale(scale)..translate(-c.dx, -c.dy)) * currentMatrix;
               }
             } else if (_sCtrl.hasClients) _sCtrl.jumpTo((_sCtrl.offset + e.scrollDelta.dy).clamp(_sCtrl.position.minScrollExtent, _sCtrl.position.maxScrollExtent));
           }
         },
-        child: GestureDetector(onTap: () => setState(() => _showControls = !_showControls), child: _isLoading ? const Center(child: CircularProgressIndicator(color: kColorCoral)) : InteractiveViewer(transformationController: _tCtrl, minScale: 0.05, maxScale: 10.0, scaleEnabled: _isCtrlPressed || _pointerCount > 1, panEnabled: true, trackpadScrollCausesScale: false, interactionEndFrictionCoefficient: 0.00001, child: ListView.builder(controller: _sCtrl, physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()), cacheExtent: 3000, itemCount: _pages.length + 1, itemBuilder: (ctx, i) {
+        child: GestureDetector(onTap: () => setState(() => _showControls = !_showControls), child: _isLoading ? const Center(child: CircularProgressIndicator(color: kColorCoral)) : InteractiveViewer(transformationController: _tCtrl, minScale: 0.01, maxScale: 10.0, scaleEnabled: _isCtrlPressed || _pointerCount > 1, panEnabled: true, trackpadScrollCausesScale: false, interactionEndFrictionCoefficient: 0.00001, child: ListView.builder(controller: _sCtrl, physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()), cacheExtent: 3000, itemCount: _pages.length + 1, itemBuilder: (ctx, i) {
           if (i == _pages.length) return Padding(padding: const EdgeInsets.symmetric(vertical: 60), child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children:[
             if (idx < widget.allChapters.length - 1) ElevatedButton(onPressed: () => _nav(widget.allChapters[idx + 1]), style: ElevatedButton.styleFrom(backgroundColor: Colors.grey[800]), child: const Text("Previous Chapter", style: TextStyle(color: Colors.white))),
               if (idx > 0) ElevatedButton(onPressed: () => _nav(widget.allChapters[idx - 1]), style: ElevatedButton.styleFrom(backgroundColor: kColorCoral), child: const Text("Next Chapter", style: TextStyle(color: Colors.white)))
@@ -548,14 +546,14 @@ class _InternalPlayerScreenState extends State<InternalPlayerScreen> {
   @override void dispose() { _durSub?.cancel(); _progT?.cancel(); _hideT?.cancel(); _p.stop(); try { if (_p.state.position.inSeconds > 10) _prog.saveProgress(widget.animeId, widget.epNum, _p.state.position.inSeconds); } catch (_) {} _p.dispose(); super.dispose(); }
   String _fmt(Duration d) => d.inHours > 0 ? '${d.inHours.toString().padLeft(2,'0')}:${(d.inMinutes%60).toString().padLeft(2,'0')}:${(d.inSeconds%60).toString().padLeft(2,'0')}' : '${(d.inMinutes%60).toString().padLeft(2,'0')}:${(d.inSeconds%60).toString().padLeft(2,'0')}';
 
-  @override Widget build(BuildContext context) => Scaffold(backgroundColor: Colors.black, body: SafeArea(child: Stack(alignment: Alignment.center, children:[
-    Video(controller: _c, controls: NoVideoControls),
-    Row(children:[Expanded(child: GestureDetector(behavior: HitTestBehavior.translucent, onTap: _toggle, onDoubleTap: () => _doubleTap(false), child: Container(color: Colors.transparent))), Expanded(child: GestureDetector(behavior: HitTestBehavior.translucent, onTap: _toggle, onDoubleTap: () => _doubleTap(true), child: Container(color: Colors.transparent)))]),
-    if (_showRwd) Align(alignment: Alignment.centerLeft, child: Padding(padding: const EdgeInsets.only(left: 50), child: _buildFb(LucideIcons.rewind, "-10s"))),
-      if (_showFwd) Align(alignment: Alignment.centerRight, child: Padding(padding: const EdgeInsets.only(right: 50), child: _buildFb(LucideIcons.fastForward, "+10s"))),
-        if (_showControls) CustomMobileControls(c: _c, title: widget.title, onClose: () => Navigator.pop(context), fmt: _fmt),
-  ])));
-  Widget _buildFb(IconData icon, String text) => Column(mainAxisSize: MainAxisSize.min, children:[Icon(icon, color: Colors.white.withOpacity(0.8), size: 40), Text(text, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))]).animate().scale(duration: 200.ms, curve: Curves.easeOutBack).fadeOut(delay: 300.ms, duration: 300.ms);
+@override Widget build(BuildContext context) => Scaffold(backgroundColor: Colors.black, body: SafeArea(child: Stack(alignment: Alignment.center, children:[
+  Video(controller: _c, controls: NoVideoControls),
+  Row(children:[Expanded(child: GestureDetector(behavior: HitTestBehavior.translucent, onTap: _toggle, onDoubleTap: () => _doubleTap(false), child: Container(color: Colors.transparent))), Expanded(child: GestureDetector(behavior: HitTestBehavior.translucent, onTap: _toggle, onDoubleTap: () => _doubleTap(true), child: Container(color: Colors.transparent)))]),
+  if (_showRwd) Align(alignment: Alignment.centerLeft, child: Padding(padding: const EdgeInsets.only(left: 50), child: _buildFb(LucideIcons.rewind, "-10s"))),
+    if (_showFwd) Align(alignment: Alignment.centerRight, child: Padding(padding: const EdgeInsets.only(right: 50), child: _buildFb(LucideIcons.fastForward, "+10s"))),
+      if (_showControls) CustomMobileControls(c: _c, title: widget.title, onClose: () => Navigator.pop(context), fmt: _fmt),
+])));
+Widget _buildFb(IconData icon, String text) => Column(mainAxisSize: MainAxisSize.min, children:[Icon(icon, color: Colors.white.withOpacity(0.8), size: 40), Text(text, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))]).animate().scale(duration: 200.ms, curve: Curves.easeOutBack).fadeOut(delay: 300.ms, duration: 300.ms);
 }
 
 class CustomMobileControls extends StatefulWidget {
@@ -701,7 +699,7 @@ class _BrowseViewState extends State<BrowseView> with AutomaticKeepAliveClientMi
                               ],
                             ),
                           ),
-                           const SizedBox(height: 20),
+                          const SizedBox(height: 20),
                         ],
                       ],
                       Padding(padding: EdgeInsets.only(left: isMobile ? 20 : 40, bottom: 15), child: Text(_query.isEmpty ? (_isMangaMode ? "Popular Updates" : "Trending Anime") : "Results", style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.bold, color: kColorDarkText))).adapt(t, delay: 200, slideY: true),
@@ -963,19 +961,14 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
   void _loadData() async {
     final useVi = widget.anime.sourceId == 'vi';
 
-    // Self-Healing Cover Logic: If user clicks a broken manga cover, fetch page 1 and refresh the UI cover dynamically
-    if (widget.anime.isManga && widget.anime.sourceId == 'allanime') {
-      widget.anime.resolveActualCover().then((_) {
-        if (mounted) setState(() {});
-      });
-    }
+// REMOVED: Self-Healing Logic (It was overwriting the good thumbnail with a bad one)
 
-    final items = widget.anime.isManga
-    ? (widget.anime.sourceId == 'allanime'
-    ? await AllMangaCore.getChapters(widget.anime.id)
-    : await MangaCore.getChapters(widget.anime.id))
-    : (useVi ? await ViAnimeCore.getEpisodes(widget.anime.id) : await AniCore.getEpisodes(widget.anime.id));
-    if (mounted) setState(() { _episodes = items; _isLoading = false; });
+final items = widget.anime.isManga
+? (widget.anime.sourceId == 'allanime'
+? await AllMangaCore.getChapters(widget.anime.id)
+: await MangaCore.getChapters(widget.anime.id))
+: (useVi ? await ViAnimeCore.getEpisodes(widget.anime.id) : await AniCore.getEpisodes(widget.anime.id));
+if (mounted) setState(() { _episodes = items; _isLoading = false; });
   }
   Future<void> _handleItemTap(String idNum) async {
     if (widget.anime.isManga) {
