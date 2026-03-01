@@ -146,3 +146,4 @@ This project is licensed under the **GPLv3 License**, effectively inheriting the
 *   Manga data provided by [MangaDex](https://mangadex.org).
 *   Specific logic adapted from the [minhmc2007/ani-cli](https://github.com/minhmc2007/ani-cli) fork.
 *   Built with [Flutter](https://flutter.dev).
+*   PhimAPI logic [Sudachi](https://github.com/KabosuNeko/Sudachi)
