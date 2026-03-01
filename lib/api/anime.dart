@@ -1,0 +1,316 @@
+import 'dart:convert';
+import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
+
+import 'manga.dart' show AnimeModel;
+
+// ════════════════════════════════════════════════════════════════════════════
+// ANIME SOURCE ENUM + PROVIDER
+// ════════════════════════════════════════════════════════════════════════════
+
+enum AnimeSource { en, vi }
+
+extension AnimeSourceX on AnimeSource {
+  String get label       => this == AnimeSource.en ? 'English' : 'Tiếng Việt';
+  String get description => this == AnimeSource.en ? 'AllAnime · Sub' : 'PhimAPI · Vietsub';
+}
+
+class SourceProvider extends ChangeNotifier {
+  static const _key = 'anime_source';
+  AnimeSource _source = AnimeSource.en;
+
+  AnimeSource get source => _source;
+  bool get isVi          => _source == AnimeSource.vi;
+
+  SourceProvider() { _load(); }
+
+  Future<void> _load() async {
+    final prefs = await SharedPreferences.getInstance();
+    _source = prefs.getString(_key) == 'vi' ? AnimeSource.vi : AnimeSource.en;
+    notifyListeners();
+  }
+
+  Future<void> setSource(AnimeSource s) async {
+    _source = s;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_key, s.name);
+    notifyListeners();
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// ANICORE  (allanime.day — English sub/dub)
+// ════════════════════════════════════════════════════════════════════════════
+
+class AniCore {
+  static const String baseUrl = 'https://api.allanime.day/api';
+  static const String referer = 'https://allmanga.to';
+  static const String agent   =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+  '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+  static const String _showQuery = r'''
+  query($search: SearchInput, $limit: Int, $page: Int, $translationType: VaildTranslationTypeEnumType, $countryOrigin: VaildCountryOriginEnumType) {
+  shows(search: $search, limit: $limit, page: $page, translationType: $translationType, countryOrigin: $countryOrigin) {
+  edges { _id name thumbnail }
+}
+}
+''';
+
+static Future<List<AnimeModel>> getTrending() async {
+  final variables = {
+    'search': {'allowAdult': false, 'allowUnknown': false, 'sortBy': 'Top'},
+    'limit': 40, 'page': 1, 'translationType': 'sub', 'countryOrigin': 'ALL',
+  };
+  try {
+    final res = await _get(_showQuery, variables);
+    final List edges = res['data']['shows']['edges'];
+    return edges.map((e) => AnimeModel.fromJson(e)).toList();
+  } catch (e) {
+    print('AniCore Trending Error: $e');
+    return [];
+  }
+}
+
+static Future<List<AnimeModel>> search(String query) async {
+  final variables = {
+    'search': {'allowAdult': false, 'allowUnknown': false, 'query': query},
+    'limit': 40, 'page': 1, 'translationType': 'sub', 'countryOrigin': 'ALL',
+  };
+  try {
+    final res = await _get(_showQuery, variables);
+    final List edges = res['data']['shows']['edges'];
+    return edges.map((e) => AnimeModel.fromJson(e)).toList();
+  } catch (e) {
+    print('AniCore Search Error: $e');
+    return [];
+  }
+}
+
+static Future<List<String>> getEpisodes(String animeId) async {
+  const String gql = r'''
+  query ($showId: String!) {
+  show(_id: $showId) { _id availableEpisodesDetail }
+}
+''';
+try {
+  final res = await _get(gql, {'showId': animeId});
+  final d = res['data']['show']['availableEpisodesDetail'];
+  final List details = d['sub'] ?? d['dub'] ?? d['raw'] ?? [];
+  return details.reversed.map((e) => e.toString()).toList();
+} catch (e) {
+  return [];
+}
+}
+
+static Future<String?> getStreamUrl(String animeId, String episodeNum) async {
+  const String gql = r'''
+  query ($showId: String!, $translationType: VaildTranslationTypeEnumType!, $episodeString: String!) {
+  episode(showId: $showId translationType: $translationType episodeString: $episodeString) {
+  episodeString sourceUrls
+}
+}
+''';
+try {
+  final res = await _get(gql, {
+    'showId': animeId, 'translationType': 'sub', 'episodeString': episodeNum,
+  });
+  final List sources = res['data']['episode']['sourceUrls'];
+  for (final source in sources) {
+    String url = source['sourceUrl'] as String;
+    if (url.startsWith('--')) {
+      final decrypted = _decrypt(url.substring(2));
+      if (decrypted.startsWith('http')) {
+        return decrypted.replaceFirst('/clock', '/clock.json');
+      }
+    }
+  }
+} catch (e) {
+  print('AniCore Stream Error: $e');
+}
+return null;
+}
+
+// ── Private ─────────────────────────────────────────────────────────────────
+
+static Future<Map<String, dynamic>> _get(String query, Map<String, dynamic> vars) async {
+  final uri = Uri.parse('$baseUrl?variables=${jsonEncode(vars)}&query=$query');
+  final res  = await http.get(uri, headers: {'User-Agent': agent, 'Referer': referer});
+  if (res.statusCode == 200) return jsonDecode(res.body);
+  throw Exception('AniCore API Error ${res.statusCode}');
+}
+
+static String _decrypt(String input) {
+  const Map<String, String> map = {
+    '01': '9', '08': '0', '09': '1', '0a': '2', '0b': '3', '0c': '4',
+    '0d': '5', '0e': '6', '0f': '7', '00': '8',
+    '50': 'h', '51': 'i', '52': 'j', '53': 'k', '54': 'l', '55': 'm',
+    '56': 'n', '57': 'o', '58': 'p', '59': 'a', '5a': 'b', '5b': 'c',
+    '5c': 'd', '5d': 'e', '5e': 'f', '5f': 'g',
+    '60': 'X', '61': 'Y', '62': 'Z', '63': '[', '64': r'\', '65': ']',
+    '66': '^', '67': '_', '68': 'P', '69': 'Q', '6a': 'R', '6b': 'S',
+    '6c': 'T', '6d': 'U', '6e': 'V', '6f': 'W',
+    '70': 'H', '71': 'I', '72': 'J', '73': 'K', '74': 'L', '75': 'M',
+    '76': 'N', '77': 'O', '78': '@', '79': 'A', '7a': 'B', '7b': 'C',
+    '7c': 'D', '7d': 'E', '7e': 'F', '7f': 'G',
+    '40': 'x', '41': 'y', '42': 'z', '48': 'p', '49': 'q', '4a': 'r',
+    '4b': 's', '4c': 't', '4d': 'u', '4e': 'v', '4f': 'w',
+    '15': '-', '16': '.', '02': ':', '17': '/', '07': '?', '05': '=',
+    '12': '*', '13': '+', '14': ',', '03': ';',
+  };
+  final buf = StringBuffer();
+  for (int i = 0; i + 2 <= input.length; i += 2) {
+    buf.write(map[input.substring(i, i + 2).toLowerCase()] ?? '');
+  }
+  return buf.toString();
+}
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// ANIME API  (legacy search wrapper)
+// ════════════════════════════════════════════════════════════════════════════
+
+class AnimeApi {
+  static const String _baseUrl   = 'https://api.allanime.day/api';
+  static const String _referer   = 'https://allmanga.to';
+  static const String _userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+  '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+  static const String _searchGql = r'''
+  query($search: SearchInput, $limit: Int, $page: Int, $translationType: VaildTranslationTypeEnumType, $countryOrigin: VaildCountryOriginEnumType) {
+  shows(search: $search, limit: $limit, page: $page, translationType: $translationType, countryOrigin: $countryOrigin) {
+  edges { _id name thumbnail availableEpisodes }
+}
+}
+''';
+
+static Future<List<Anime>> search(String query) async {
+  final variables = {
+    'search': {'allowAdult': false, 'allowUnknown': false, 'query': query},
+    'limit': 40, 'page': 1, 'translationType': 'sub', 'countryOrigin': 'ALL',
+  };
+  try {
+    final res = await http.get(
+      Uri.parse('$_baseUrl?variables=${jsonEncode(variables)}&query=$_searchGql'),
+      headers: {'User-Agent': _userAgent, 'Referer': _referer},
+    );
+    if (res.statusCode == 200) {
+      final List edges = jsonDecode(res.body)['data']['shows']['edges'];
+      return edges.map((e) => Anime.fromJson(e)).toList();
+    }
+  } catch (e) {
+    print('AnimeApi Search Error: $e');
+  }
+  return [];
+}
+}
+
+class Anime {
+  final String id;
+  final String name;
+  final String? thumbnail;
+  final dynamic availableEpisodes;
+
+  Anime({required this.id, required this.name, this.thumbnail, this.availableEpisodes});
+
+  factory Anime.fromJson(Map<String, dynamic> json) => Anime(
+    id: json['_id'] ?? '',
+    name: json['name'] ?? 'Unknown',
+    thumbnail: json['thumbnail'],
+    availableEpisodes: json['availableEpisodes'],
+  );
+
+  String get fullImageUrl => thumbnail != null
+  ? 'https://wp.youtube-anime.com/alldata/$thumbnail'
+  : 'https://via.placeholder.com/300x450';
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// VI ANIME CORE  (PhimAPI — Vietsub)
+// ════════════════════════════════════════════════════════════════════════════
+
+class ViAnimeCore {
+  static const String baseUrl  = 'https://phimapi.com';
+  static const String cdnImage = 'https://phimimg.com';
+  static const String referer  = 'https://phimapi.com';
+
+  static const Map<String, String> _headers = {'User-Agent': 'AniCli-Flutter/2.0'};
+
+  static Future<List<AnimeModel>> getTrending() => _fetchList(
+    '$baseUrl/v1/api/danh-sach/hoat-hinh'
+  '?page=1&country=nhat-ban&limit=40'
+  '&sort_field=modified.time&sort_type=desc',
+  );
+
+  static Future<List<AnimeModel>> search(String query) async {
+    if (query.trim().isEmpty) return getTrending();
+    return _fetchList('$baseUrl/v1/api/tim-kiem?keyword=${Uri.encodeQueryComponent(query.trim())}&limit=40');
+  }
+
+  static Future<List<String>> getEpisodes(String slug) async {
+    try {
+      final res = await http
+      .get(Uri.parse('$baseUrl/phim/$slug'), headers: _headers)
+      .timeout(const Duration(seconds: 15));
+      if (res.statusCode != 200) return [];
+      final sd = _serverData(jsonDecode(res.body));
+      if (sd == null) return [];
+      return List.generate(sd.length, (i) => '${i + 1}');
+    } catch (e) {
+      return [];
+    }
+  }
+
+  static Future<String?> getStreamUrl(String slug, String episodeNum) async {
+    try {
+      final idx = int.tryParse(episodeNum) ?? 1;
+      final res = await http
+      .get(Uri.parse('$baseUrl/phim/$slug'), headers: _headers)
+      .timeout(const Duration(seconds: 15));
+      if (res.statusCode != 200) return null;
+      final sd = _serverData(jsonDecode(res.body));
+      if (sd == null) return null;
+      return sd[(idx - 1).clamp(0, sd.length - 1)]['link_m3u8'] as String?;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // ── Private ─────────────────────────────────────────────────────────────────
+
+  static Future<List<AnimeModel>> _fetchList(String url) async {
+    try {
+      final res = await http
+      .get(Uri.parse(url), headers: _headers)
+      .timeout(const Duration(seconds: 15));
+      if (res.statusCode != 200) return [];
+      final root  = jsonDecode(res.body);
+      final inner = root['data'] ?? root;
+      final items = inner['items'];
+      if (items == null || items is! List) return [];
+      final cdn = (inner['APP_DOMAIN_CDN_IMAGE'] as String?) ?? cdnImage;
+      return items.map<AnimeModel>((item) {
+        String thumb = item['poster_url'] ?? item['thumb_url'] ?? '';
+      if (thumb.isNotEmpty && !thumb.startsWith('http')) {
+        thumb = thumb.startsWith('/') ? '$cdn$thumb' : '$cdn/$thumb';
+      }
+      return AnimeModel(
+        id: item['slug'] ?? '',
+        name: item['name'] ?? 'Unknown',
+        thumbnail: thumb.isEmpty ? null : thumb,
+        isManga: false,
+        sourceId: 'vi',
+      );
+      }).toList();
+    } catch (e) {
+      return [];
+    }
+  }
+
+  static List? _serverData(Map<String, dynamic> data) {
+    final episodes = data['episodes'] as List?;
+    if (episodes == null || episodes.isEmpty) return null;
+    return episodes[0]['server_data'] as List?;
+  }
+}
