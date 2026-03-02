@@ -12,8 +12,6 @@ class AnimeModel {
   final String name;
   String? thumbnail;
   final bool isManga;
-
-  /// 'en' | 'vi' | 'allanime' | 'mangadex'
   final String sourceId;
 
   AnimeModel({
@@ -64,7 +62,7 @@ class AnimeModel {
   String get fullImageUrl {
     if (thumbnail == null || thumbnail!.isEmpty) return 'https://via.placeholder.com/300x450';
       if (thumbnail!.startsWith('http')) return thumbnail!;
-      // Fallback for any legacy data
+      // Fallback using the cover server
       return 'https://wp.youtube-anime.com/aln.youtube-anime.com/$thumbnail?w=250';
   }
 }
@@ -111,7 +109,6 @@ class MangaCore {
 
   static Future<List<AnimeModel>> getTrending() => search('');
 
-  // Fallback: If AllManga image 404s, try finding a cover on MangaDex
   static Future<String?> findMangaDexCover(String title) async {
     try {
       final results = await search(title);
@@ -154,13 +151,15 @@ class MangaCore {
     }
     var chapters = await fetch(['en']);
     if (chapters.isEmpty) chapters = await fetch(null);
+
+    // Sort logic handled by API usually, but let's be safe
     final results = <String>[];
     for (final c in chapters) {
       final attr = c['attributes'];
       if (attr['externalUrl'] != null) continue;
       results.add('${c['id']}|${attr['chapter'] ?? 'Oneshot'} [${attr['translatedLanguage'] ?? '??'}]');
     }
-    return results;
+    return _numericSort(results);
   }
 
   static Future<List<String>> getPages(String chapterId) async {
@@ -177,6 +176,16 @@ class MangaCore {
     } catch (_) {}
     return [];
   }
+
+  // Helper to ensure chapters like "10.5" are sorted correctly between "10" and "11"
+  static List<String> _numericSort(List<String> list) {
+    list.sort((a, b) {
+      final numA = double.tryParse(a.split('|')[1].split(' ')[0]) ?? 0;
+      final numB = double.tryParse(b.split('|')[1].split(' ')[0]) ?? 0;
+      return numB.compareTo(numA); // Descending (Latest first)
+    });
+    return list;
+  }
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -184,12 +193,9 @@ class MangaCore {
 // ════════════════════════════════════════════════════════════════════════════
 
 class AllMangaCore {
-  static bool debugMode = false;
-
   static const String _apiUrl = 'https://api.allanime.day/api';
   static const String _imageServer = 'https://ytimgf.fast4speed.rsvp';
   static const String _coverServer = 'https://wp.youtube-anime.com/aln.youtube-anime.com';
-
   static const String _referer = 'https://allmanga.to/';
   static const String _readerRef = 'https://youtu-chan.com/';
 
@@ -232,7 +238,6 @@ class AllMangaCore {
       final List edges = data['data']?['mangas']?['edges'] as List? ?? [];
       return edges.map((e) => _fromEdge(e)).toList();
     } catch (e) {
-      if (debugMode) print('AllManga Search Error: $e');
       return [];
     }
   }
@@ -248,9 +253,19 @@ class AllMangaCore {
       final detail = data['data']?['manga']?['availableChaptersDetail'];
       if (detail == null) return [];
       final List raw = (detail['sub'] ?? detail['raw'] ?? detail['dub'] ?? []) as List;
-      return raw.map((c) => c.toString()).toList().reversed.toList();
+
+      final List<String> strList = raw.map((c) => c.toString()).toList();
+
+      // Strict Numerical Sort Descending (Newest first)
+      // This fixes the 0.2 vs 0.1 ordering issue
+      strList.sort((a, b) {
+        double nA = double.tryParse(a) ?? 0;
+        double nB = double.tryParse(b) ?? 0;
+        return nB.compareTo(nA);
+      });
+
+      return strList;
     } catch (e) {
-      if (debugMode) print('AllManga Chapters Error: $e');
       return [];
     }
   }
@@ -291,7 +306,6 @@ class AllMangaCore {
         if (!newAdded) break;
         offset += limit;
       } catch (e) {
-        if (debugMode) print('AllManga Pages Error (offset $offset): $e');
         break;
       }
     }
@@ -317,10 +331,8 @@ class AllMangaCore {
       String? thumb = e['thumbnail'] as String?;
       if (thumb != null && !thumb.startsWith('http')) {
         final cleanPath = thumb.replaceFirst(RegExp(r'^/+'), '');
-
-        // FIX: Force filename to 001.jpg/png to get the front cover
+        // Force filename to 001.jpg/png to get the front cover
         final adjustedPath = cleanPath.replaceFirst(RegExp(r'\d+(?=\.(jpg|png|webp))'), '001');
-
         thumb = '$_coverServer/$adjustedPath?w=250';
       }
       return AnimeModel(

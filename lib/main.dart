@@ -33,11 +33,16 @@ const kColorSoftPink = Color(0xFFFDACAC);
 const kColorCoral = Color(0xFFFD7979);
 const kColorDarkText = Color(0xFF4A2B2B);
 
+// --- ENUMS ---
+enum AnimeSource { en, vi }
+enum MangaSource { allanime, mangadex }
+
 // --- MAIN ENTRY POINT ---
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
   final prefs = await SharedPreferences.getInstance();
+
   runApp(MultiProvider(providers:[
     ChangeNotifierProvider(create: (_) => UserProvider()),
     ChangeNotifierProvider(create: (_) => SettingsProvider()),
@@ -53,15 +58,136 @@ class AniCliApp extends StatelessWidget {
   @override Widget build(BuildContext context) {
     context.read<SettingsProvider>().initPerformanceMode();
     return MaterialApp(
-      title: 'AniCli Flutter', debugShowCheckedModeBanner: false,
+      title: 'AniCli Flutter',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        brightness: Brightness.light, scaffoldBackgroundColor: kColorCream,
+        brightness: Brightness.light,
+        scaffoldBackgroundColor: kColorCream,
         textTheme: GoogleFonts.interTextTheme(ThemeData.light().textTheme).apply(bodyColor: kColorDarkText, displayColor: kColorDarkText),
-        useMaterial3: true, iconTheme: const IconThemeData(color: kColorDarkText),
-        pageTransitionsTheme: const PageTransitionsTheme(builders: {TargetPlatform.android: ZoomPageTransitionsBuilder(), TargetPlatform.iOS: CupertinoPageTransitionsBuilder(), TargetPlatform.windows: ZoomPageTransitionsBuilder(), TargetPlatform.linux: ZoomPageTransitionsBuilder(), TargetPlatform.macOS: ZoomPageTransitionsBuilder()})),
-        home: isFirstLaunch ? const OnboardingScreen() : const MainScreen(),
+        useMaterial3: true,
+        iconTheme: const IconThemeData(color: kColorDarkText),
+        pageTransitionsTheme: const PageTransitionsTheme(builders: {
+          TargetPlatform.android: ZoomPageTransitionsBuilder(),
+          TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+          TargetPlatform.windows: ZoomPageTransitionsBuilder(),
+          TargetPlatform.linux: ZoomPageTransitionsBuilder(),
+          TargetPlatform.macOS: ZoomPageTransitionsBuilder()
+        })
+      ),
+      home: isFirstLaunch ? const OnboardingScreen() : const MainScreen(),
     );
   }
+}
+
+// ==========================================
+// PROVIDERS
+// ==========================================
+
+class SourceProvider extends ChangeNotifier {
+  AnimeSource _source = AnimeSource.en;
+  AnimeSource get source => _source;
+  bool get isVi => _source == AnimeSource.vi;
+
+  SourceProvider() { _loadSource(); }
+
+  Future<void> _loadSource() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString('anime_source');
+    if (saved != null) {
+      _source = saved == 'vi' ? AnimeSource.vi : AnimeSource.en;
+      notifyListeners();
+    }
+  }
+
+  Future<void> setSource(AnimeSource s) async {
+    _source = s;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('anime_source', s == AnimeSource.vi ? 'vi' : 'en');
+    notifyListeners();
+  }
+}
+
+class MangaSourceProvider extends ChangeNotifier {
+  MangaSource _source = MangaSource.allanime;
+  MangaSource get source => _source;
+
+  MangaSourceProvider() { _loadSource(); }
+
+  Future<void> _loadSource() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString('manga_source');
+    if (saved != null) {
+      _source = saved == 'mangadex' ? MangaSource.mangadex : MangaSource.allanime;
+      notifyListeners();
+    }
+  }
+
+  Future<void> setSource(MangaSource s) async {
+    _source = s;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('manga_source', s == MangaSource.mangadex ? 'mangadex' : 'allanime');
+    notifyListeners();
+  }
+}
+
+enum PerformanceMode { auto, bestLooking, balanced, bestPerformance }
+enum PerformanceTier { high, mid, low }
+
+class SettingsProvider extends ChangeNotifier {
+  bool _useInternalPlayer = false;
+  double _cacheSecs = 120;
+  PerformanceMode _perfMode = PerformanceMode.auto;
+  PerformanceTier _currentTier = PerformanceTier.high;
+  double _detectedRamGB = -1;
+
+  bool get useInternalPlayer => _useInternalPlayer;
+  double get cacheSecs => _cacheSecs;
+  PerformanceMode get perfMode => _perfMode;
+  PerformanceTier get tier => _currentTier;
+  String get ramDebugInfo => _detectedRamGB == -1 ? "Unknown" : "${_detectedRamGB.toStringAsFixed(1)} GB";
+
+  SettingsProvider() { _loadSettings(); }
+  Future<void> _loadSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    _useInternalPlayer = prefs.getBool('use_internal_player') ?? false;
+    _cacheSecs = prefs.getDouble('cache_secs') ?? 120.0;
+    _perfMode = PerformanceMode.values[prefs.getInt('perf_mode') ?? 0];
+    await initPerformanceMode();
+  }
+  Future<void> initPerformanceMode() async {
+    if (_detectedRamGB == -1) _detectedRamGB = await MemoryUtils.getTotalRamGB();
+    _calculateTier(); notifyListeners();
+  }
+  void _calculateTier() {
+    if (_perfMode == PerformanceMode.bestLooking) _currentTier = PerformanceTier.high;
+    else if (_perfMode == PerformanceMode.balanced) _currentTier = PerformanceTier.mid;
+    else if (_perfMode == PerformanceMode.bestPerformance) _currentTier = PerformanceTier.low;
+    else {
+      if (_detectedRamGB == -1) _currentTier = (Platform.isAndroid || Platform.isIOS) ? PerformanceTier.mid : PerformanceTier.high;
+      else if (_detectedRamGB > 8.0) _currentTier = PerformanceTier.high;
+      else if (_detectedRamGB >= 4.0) _currentTier = PerformanceTier.mid;
+      else _currentTier = PerformanceTier.low;
+    }
+  }
+  void toggleInternalPlayer(bool v) async { _useInternalPlayer = v; final p = await SharedPreferences.getInstance(); await p.setBool('use_internal_player', v); notifyListeners(); }
+  void setCacheSecs(double v) async { _cacheSecs = v; final p = await SharedPreferences.getInstance(); await p.setDouble('cache_secs', v); notifyListeners(); }
+  void setPerformanceMode(PerformanceMode m) async { _perfMode = m; _calculateTier(); final p = await SharedPreferences.getInstance(); await p.setInt('perf_mode', m.index); notifyListeners(); }
+}
+
+class ProgressProvider extends ChangeNotifier {
+  Map<String, int> _progress = {};
+  ProgressProvider() { _loadProgress(); }
+  Future<void> _loadProgress() async {
+    final prefs = await SharedPreferences.getInstance();
+    final stored = prefs.getString('watch_progress');
+    if (stored != null) { _progress = Map<String, int>.from(jsonDecode(stored)); notifyListeners(); }
+  }
+  Future<void> saveProgress(String animeId, String epNum, int seconds) async {
+    _progress["${animeId}_$epNum"] = seconds;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('watch_progress', jsonEncode(_progress));
+  }
+  int getProgress(String animeId, String epNum) => _progress["${animeId}_$epNum"] ?? 0;
 }
 
 // ==========================================
@@ -95,75 +221,13 @@ extension AnimExt on Widget {
     if (isScale) return a.scale(begin: const Offset(0.8, 0.8), curve: Curves.easeOutBack, duration: duration.ms);
     return slideY ? a.slideY(begin: slideBegin, end: 0, curve: Curves.easeOutCubic, duration: duration.ms) : a.slideX(begin: slideBegin, end: 0, curve: Curves.easeOutCubic, duration: duration.ms);
   }
-
   Widget simpleDrop(PerformanceTier t, {int delay = 0}) {
     if (t == PerformanceTier.low) return this;
-    return animate(delay: delay.ms)
-    .fadeIn(duration: 300.ms)
-    .slideY(begin: -0.15, end: 0, curve: Curves.easeOut, duration: 300.ms);
+    return animate(delay: delay.ms).fadeIn(duration: 300.ms).slideY(begin: -0.15, end: 0, curve: Curves.easeOut, duration: 300.ms);
   }
 }
 
 extension LetExt<T> on T { R let<R>(R Function(T) cb) => cb(this); }
-
-// ==========================================
-// PROVIDERS
-// ==========================================
-enum PerformanceMode { auto, bestLooking, balanced, bestPerformance }
-enum PerformanceTier { high, mid, low }
-
-class SettingsProvider extends ChangeNotifier {
-  bool _useInternalPlayer = false;
-  PerformanceMode _perfMode = PerformanceMode.auto;
-  PerformanceTier _currentTier = PerformanceTier.high;
-  double _detectedRamGB = -1;
-
-  bool get useInternalPlayer => _useInternalPlayer;
-  PerformanceMode get perfMode => _perfMode;
-  PerformanceTier get tier => _currentTier;
-  String get ramDebugInfo => _detectedRamGB == -1 ? "Unknown" : "${_detectedRamGB.toStringAsFixed(1)} GB";
-
-  SettingsProvider() { _loadSettings(); }
-  Future<void> _loadSettings() async {
-    final prefs = await SharedPreferences.getInstance();
-    _useInternalPlayer = prefs.getBool('use_internal_player') ?? false;
-    _perfMode = PerformanceMode.values[prefs.getInt('perf_mode') ?? 0];
-    await initPerformanceMode();
-  }
-  Future<void> initPerformanceMode() async {
-    if (_detectedRamGB == -1) _detectedRamGB = await MemoryUtils.getTotalRamGB();
-    _calculateTier(); notifyListeners();
-  }
-  void _calculateTier() {
-    if (_perfMode == PerformanceMode.bestLooking) _currentTier = PerformanceTier.high;
-    else if (_perfMode == PerformanceMode.balanced) _currentTier = PerformanceTier.mid;
-    else if (_perfMode == PerformanceMode.bestPerformance) _currentTier = PerformanceTier.low;
-    else {
-      if (_detectedRamGB == -1) _currentTier = (Platform.isAndroid || Platform.isIOS) ? PerformanceTier.mid : PerformanceTier.high;
-      else if (_detectedRamGB > 8.0) _currentTier = PerformanceTier.high;
-      else if (_detectedRamGB >= 4.0) _currentTier = PerformanceTier.mid;
-      else _currentTier = PerformanceTier.low;
-    }
-  }
-  void toggleInternalPlayer(bool v) async { _useInternalPlayer = v; final p = await SharedPreferences.getInstance(); await p.setBool('use_internal_player', v); notifyListeners(); }
-  void setPerformanceMode(PerformanceMode m) async { _perfMode = m; _calculateTier(); final p = await SharedPreferences.getInstance(); await p.setInt('perf_mode', m.index); notifyListeners(); }
-}
-
-class ProgressProvider extends ChangeNotifier {
-  Map<String, int> _progress = {};
-  ProgressProvider() { _loadProgress(); }
-  Future<void> _loadProgress() async {
-    final prefs = await SharedPreferences.getInstance();
-    final stored = prefs.getString('watch_progress');
-    if (stored != null) { _progress = Map<String, int>.from(jsonDecode(stored)); notifyListeners(); }
-  }
-  Future<void> saveProgress(String animeId, String epNum, int seconds) async {
-    _progress["${animeId}_$epNum"] = seconds;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('watch_progress', jsonEncode(_progress));
-  }
-  int getProgress(String animeId, String epNum) => _progress["${animeId}_$epNum"] ?? 0;
-}
 
 // ==========================================
 // SERVICES & GENERIC DIALOGS
@@ -397,6 +461,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
 class SourceSelectScreen extends StatelessWidget { const SourceSelectScreen({super.key});
 Future<void> _go(BuildContext context, AnimeSource source) async {
+  // Save source immediately before navigating
   await context.read<SourceProvider>().setSource(source);
   if (context.mounted) Navigator.of(context).pushReplacement(PageRouteBuilder(pageBuilder: (_,__,___) => const MainScreen(), transitionsBuilder: (_, a, __, c) => FadeTransition(opacity: a, child: c), transitionDuration: const Duration(milliseconds: 600)));
 }
@@ -426,9 +491,13 @@ class _MainScreenState extends State<MainScreen> {
   }
   @override void initState() { super.initState(); UpdaterService.checkSilent(context); }
   @override Widget build(BuildContext context) {
+    // Listen to SourceProvider here so it rebuilds when source changes
+    final sourceProvider = context.watch<SourceProvider>();
+    final src = sourceProvider.source;
+
     Widget activePage; Key activeKey;
     switch (_idx) {
-      case 0: final src = context.watch<SourceProvider>().source; activePage = BrowseView(key: ValueKey("Browse_${src.name}"), onAnimeTap: _openDetail); activeKey = ValueKey("BrowseTab_${src.name}"); break;
+      case 0: activePage = BrowseView(key: ValueKey("Browse_${src.name}"), onAnimeTap: _openDetail); activeKey = ValueKey("BrowseTab_${src.name}"); break;
       case 1: activePage = HistoryView(key: _hKey, onAnimeTap: _openDetail); activeKey = const ValueKey("HistoryTab"); break;
       case 2: activePage = FavoritesView(key: _fKey, onAnimeTap: _openDetail); activeKey = const ValueKey("FavTab"); break;
       default: activePage = SettingsView(key: _sKey); activeKey = const ValueKey("SettingsTab"); break;
@@ -456,13 +525,13 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
   Future<void> _loadPages() async {
     setState(() => _isLoading = true);
     final pages = widget.anime.sourceId == 'allanime'
-? await AllMangaCore.getPages(widget.anime.id, widget.chapterNum)
-: await MangaCore.getPages(widget.chapterNum);
-if (mounted) setState(() { _pages = pages; _isLoading = false; });
+    ? await AllMangaCore.getPages(widget.anime.id, widget.chapterNum)
+    : await MangaCore.getPages(widget.chapterNum);
+    if (mounted) setState(() { _pages = pages; _isLoading = false; });
   }
   void _nav(String newChap) {
     context.read<UserProvider>().addToHistory(widget.anime, newChap);
-    Navigator.pushReplacement(context, PageRouteBuilder(pageBuilder: (_,__,___) => MangaReaderScreen(anime: widget.anime, chapterNum: newChap, allChapters: widget.allChapters), transitionsBuilder: (_, a, __, c) => FadeTransition(opacity: a, child: c)));
+    Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => MangaReaderScreen(anime: widget.anime, chapterNum: newChap, allChapters: widget.allChapters)));
   }
   Future<void> _downloadImage(String url, int index) async {
     try {
@@ -520,6 +589,18 @@ class _InternalPlayerScreenState extends State<InternalPlayerScreen> {
   @override void initState() {
     super.initState(); _p = Player(configuration: const PlayerConfiguration(vo: 'gpu'));
     _c = VideoController(_p, configuration: const VideoControllerConfiguration(enableHardwareAcceleration: true, androidAttachSurfaceAfterVideoParameters: true));
+
+    final cacheSecs = context.read<SettingsProvider>().cacheSecs;
+    try {
+      if (cacheSecs > 300) {
+        (_p.platform as dynamic).setProperty('cache', 'yes');
+        (_p.platform as dynamic).setProperty('demuxer-max-bytes', '2000000000');
+        (_p.platform as dynamic).setProperty('demuxer-readahead-secs', '99999');
+      } else {
+        (_p.platform as dynamic).setProperty('demuxer-readahead-secs', cacheSecs.toString());
+      }
+    } catch (_) {}
+
     _durSub = _p.stream.duration.listen((d) { if (!_resumeChecked && d.inSeconds > 0) { _resumeChecked = true; _checkResume(); } });
     _p.open(Media(widget.streamUrl, httpHeaders: {'Referer': widget.referer.isNotEmpty ? widget.referer : AniCore.referer}));
     _progT = Timer.periodic(const Duration(seconds: 5), (_) { if (mounted && _p.state.position.inSeconds > 10) context.read<ProgressProvider>().saveProgress(widget.animeId, widget.epNum, _p.state.position.inSeconds); });
@@ -546,14 +627,14 @@ class _InternalPlayerScreenState extends State<InternalPlayerScreen> {
   @override void dispose() { _durSub?.cancel(); _progT?.cancel(); _hideT?.cancel(); _p.stop(); try { if (_p.state.position.inSeconds > 10) _prog.saveProgress(widget.animeId, widget.epNum, _p.state.position.inSeconds); } catch (_) {} _p.dispose(); super.dispose(); }
   String _fmt(Duration d) => d.inHours > 0 ? '${d.inHours.toString().padLeft(2,'0')}:${(d.inMinutes%60).toString().padLeft(2,'0')}:${(d.inSeconds%60).toString().padLeft(2,'0')}' : '${(d.inMinutes%60).toString().padLeft(2,'0')}:${(d.inSeconds%60).toString().padLeft(2,'0')}';
 
-@override Widget build(BuildContext context) => Scaffold(backgroundColor: Colors.black, body: SafeArea(child: Stack(alignment: Alignment.center, children:[
-  Video(controller: _c, controls: NoVideoControls),
-  Row(children:[Expanded(child: GestureDetector(behavior: HitTestBehavior.translucent, onTap: _toggle, onDoubleTap: () => _doubleTap(false), child: Container(color: Colors.transparent))), Expanded(child: GestureDetector(behavior: HitTestBehavior.translucent, onTap: _toggle, onDoubleTap: () => _doubleTap(true), child: Container(color: Colors.transparent)))]),
-  if (_showRwd) Align(alignment: Alignment.centerLeft, child: Padding(padding: const EdgeInsets.only(left: 50), child: _buildFb(LucideIcons.rewind, "-10s"))),
-    if (_showFwd) Align(alignment: Alignment.centerRight, child: Padding(padding: const EdgeInsets.only(right: 50), child: _buildFb(LucideIcons.fastForward, "+10s"))),
-      if (_showControls) CustomMobileControls(c: _c, title: widget.title, onClose: () => Navigator.pop(context), fmt: _fmt),
-])));
-Widget _buildFb(IconData icon, String text) => Column(mainAxisSize: MainAxisSize.min, children:[Icon(icon, color: Colors.white.withOpacity(0.8), size: 40), Text(text, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))]).animate().scale(duration: 200.ms, curve: Curves.easeOutBack).fadeOut(delay: 300.ms, duration: 300.ms);
+  @override Widget build(BuildContext context) => Scaffold(backgroundColor: Colors.black, body: SafeArea(child: Stack(alignment: Alignment.center, children:[
+    Video(controller: _c, controls: NoVideoControls),
+    Row(children:[Expanded(child: GestureDetector(behavior: HitTestBehavior.translucent, onTap: _toggle, onDoubleTap: () => _doubleTap(false), child: Container(color: Colors.transparent))), Expanded(child: GestureDetector(behavior: HitTestBehavior.translucent, onTap: _toggle, onDoubleTap: () => _doubleTap(true), child: Container(color: Colors.transparent)))]),
+    if (_showRwd) Align(alignment: Alignment.centerLeft, child: Padding(padding: const EdgeInsets.only(left: 50), child: _buildFb(LucideIcons.rewind, "-10s"))),
+      if (_showFwd) Align(alignment: Alignment.centerRight, child: Padding(padding: const EdgeInsets.only(right: 50), child: _buildFb(LucideIcons.fastForward, "+10s"))),
+        if (_showControls) CustomMobileControls(c: _c, title: widget.title, onClose: () => Navigator.pop(context), fmt: _fmt),
+  ])));
+  Widget _buildFb(IconData icon, String text) => Column(mainAxisSize: MainAxisSize.min, children:[Icon(icon, color: Colors.white.withOpacity(0.8), size: 40), Text(text, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))]).animate().scale(duration: 200.ms, curve: Curves.easeOutBack).fadeOut(delay: 300.ms, duration: 300.ms);
 }
 
 class CustomMobileControls extends StatefulWidget {
@@ -699,7 +780,7 @@ class _BrowseViewState extends State<BrowseView> with AutomaticKeepAliveClientMi
                               ],
                             ),
                           ),
-                          const SizedBox(height: 20),
+                           const SizedBox(height: 20),
                         ],
                       ],
                       Padding(padding: EdgeInsets.only(left: isMobile ? 20 : 40, bottom: 15), child: Text(_query.isEmpty ? (_isMangaMode ? "Popular Updates" : "Trending Anime") : "Results", style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.bold, color: kColorDarkText))).adapt(t, delay: 200, slideY: true),
@@ -880,9 +961,30 @@ class _SettingsViewState extends State<SettingsView> {
           )
         )
       ),
-      const SizedBox(height: 15),
+      const SizedBox(height: 10),
       if (Platform.isLinux || Platform.isWindows || Platform.isMacOS) ...[
         _sw(LucideIcons.playCircle, "Use Internal Player", "Use built-in player instead of System MPV", sp.useInternalPlayer, (v) => sp.toggleInternalPlayer(v)),
+        const SizedBox(height: 15),
+        LiquidGlassContainer(
+          opacity: 0.6,
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: const[Icon(LucideIcons.hardDrive, color: kColorCoral), SizedBox(width: 10), Text("Video Cache", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16))]),
+                const SizedBox(height: 5),
+                Text("Buffer Duration: ${sp.cacheSecs > 300 ? 'Unlimited' : sp.cacheSecs.toInt().toString() + ' seconds'}", style: const TextStyle(color: Colors.black54, fontSize: 13)),
+                Slider(
+                  value: sp.cacheSecs, min: 10, max: 310, divisions: 30,
+                  activeColor: kColorCoral, inactiveColor: kColorPeach,
+                  label: sp.cacheSecs > 300 ? "Unlimited" : "${sp.cacheSecs.toInt()}s",
+                  onChanged: (v) => sp.setCacheSecs(v),
+                ),
+              ]
+            )
+          )
+        ),
         const SizedBox(height: 15)
       ],
       _sec("Development"),
@@ -960,15 +1062,12 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
   @override void initState() { super.initState(); _loadData(); }
   void _loadData() async {
     final useVi = widget.anime.sourceId == 'vi';
-
-// REMOVED: Self-Healing Logic (It was overwriting the good thumbnail with a bad one)
-
-final items = widget.anime.isManga
-? (widget.anime.sourceId == 'allanime'
-? await AllMangaCore.getChapters(widget.anime.id)
-: await MangaCore.getChapters(widget.anime.id))
-: (useVi ? await ViAnimeCore.getEpisodes(widget.anime.id) : await AniCore.getEpisodes(widget.anime.id));
-if (mounted) setState(() { _episodes = items; _isLoading = false; });
+    final items = widget.anime.isManga
+    ? (widget.anime.sourceId == 'allanime'
+    ? await AllMangaCore.getChapters(widget.anime.id)
+    : await MangaCore.getChapters(widget.anime.id))
+    : (useVi ? await ViAnimeCore.getEpisodes(widget.anime.id) : await AniCore.getEpisodes(widget.anime.id));
+    if (mounted) setState(() { _episodes = items; _isLoading = false; });
   }
   Future<void> _handleItemTap(String idNum) async {
     if (widget.anime.isManga) {
@@ -989,7 +1088,15 @@ if (mounted) setState(() { _episodes = items; _isLoading = false; });
         if ((Platform.isLinux || Platform.isWindows || Platform.isMacOS) && !context.read<SettingsProvider>().useInternalPlayer) {
           final saved = context.read<ProgressProvider>().getProgress(widget.anime.id, idNum); bool resume = false;
           if (saved > 10) resume = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(backgroundColor: kColorCream, title: const Text("Resume?", style: TextStyle(color: kColorCoral, fontWeight: FontWeight.bold)), content: Text("Continue from ${Duration(seconds: saved).toString().split('.').first}?"), actions:[TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Start Over", style: TextStyle(color: Colors.black54))), ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: kColorCoral, foregroundColor: Colors.white), onPressed: () => Navigator.pop(ctx, true), child: const Text("Resume"))])) ?? false;
-          final args =[url, '--http-header-fields=Referer: $referer', '--force-media-title=${widget.anime.name} - Ep $idNum', '--save-position-on-quit']; if (resume) args.add('--start=$saved');
+
+          final cacheSecs = context.read<SettingsProvider>().cacheSecs;
+          final List<String> args =[url, '--http-header-fields=Referer: $referer', '--force-media-title=${widget.anime.name} - Ep $idNum', '--save-position-on-quit'];
+          if (resume) args.add('--start=$saved');
+          if (cacheSecs > 300) {
+            args.addAll(['--cache=yes', '--demuxer-max-bytes=2000M', '--demuxer-readahead-secs=99999']);
+          } else {
+            args.add('--demuxer-readahead-secs=${cacheSecs.toInt()}');
+          }
           try { await Process.start('mpv', args, mode: ProcessStartMode.detached); } catch (e) { if (mounted) openInternal(); }
         } else openInternal();
       } else { if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Stream not found"))); }
