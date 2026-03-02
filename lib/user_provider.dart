@@ -38,26 +38,48 @@ class HistoryItem {
 }
 
 class UserProvider extends ChangeNotifier {
-  List<AnimeModel> _favorites = [];
-  List<HistoryItem> _history = [];
+  // Normal Data
+  List<AnimeModel> _normalFavorites = [];
+  List<HistoryItem> _normalHistory = [];
 
-  List<AnimeModel> get favorites => List.unmodifiable(_favorites);
-  List<HistoryItem> get history => List.unmodifiable(_history);
+  // Incognito/NSFW Data
+  List<AnimeModel> _nsfwFavorites = [];
+  List<HistoryItem> _nsfwHistory = [];
+
+  bool _isNSFW = false;
+
+  // Dynamic getters based on current mode
+  List<AnimeModel> get favorites => List.unmodifiable(_isNSFW ? _nsfwFavorites : _normalFavorites);
+  List<HistoryItem> get history => List.unmodifiable(_isNSFW ? _nsfwHistory : _normalHistory);
+  bool get isNSFW => _isNSFW;
 
   UserProvider() {
     _loadData();
   }
 
+  // ── Mode Switching ──────────────────────────────────────────────────────────
+
+  void setMode(bool isNsfw) {
+    if (_isNSFW != isNsfw) {
+      _isNSFW = isNsfw;
+      notifyListeners();
+    }
+  }
+
   // ── Favorites ───────────────────────────────────────────────────────────────
 
-  bool isFavorite(String id) => _favorites.any((e) => e.id == id);
+  bool isFavorite(String id) {
+    final list = _isNSFW ? _nsfwFavorites : _normalFavorites;
+    return list.any((e) => e.id == id);
+  }
 
   Future<void> toggleFavorite(AnimeModel anime) async {
-    final isFav = isFavorite(anime.id);
+    final list = _isNSFW ? _nsfwFavorites : _normalFavorites;
+    final isFav = list.any((e) => e.id == anime.id);
     if (isFav) {
-      _favorites.removeWhere((e) => e.id == anime.id);
+      list.removeWhere((e) => e.id == anime.id);
     } else {
-      _favorites.add(anime);
+      list.add(anime);
     }
     notifyListeners();
     await _saveFavorites();
@@ -66,21 +88,26 @@ class UserProvider extends ChangeNotifier {
   // ── History ─────────────────────────────────────────────────────────────────
 
   Future<void> addToHistory(AnimeModel anime, String episode) async {
-    _history.removeWhere((e) => e.anime.id == anime.id);
-    _history.insert(
+    final list = _isNSFW ? _nsfwHistory : _normalHistory;
+    list.removeWhere((e) => e.anime.id == anime.id);
+    list.insert(
       0,
       HistoryItem(anime: anime, episode: episode, timestamp: DateTime.now()),
     );
-    if (_history.length > 50) _history.removeLast();
+    if (list.length > 50) list.removeLast();
     notifyListeners();
     await _saveHistory();
   }
 
   Future<void> clearHistory() async {
-    _history.clear();
+    if (_isNSFW) {
+      _nsfwHistory.clear();
+    } else {
+      _normalHistory.clear();
+    }
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('history');
+    await prefs.remove(_isNSFW ? 'nsfw_history' : 'history');
   }
 
   // ── Persistence ─────────────────────────────────────────────────────────────
@@ -88,16 +115,27 @@ class UserProvider extends ChangeNotifier {
   Future<void> _loadData() async {
     final prefs = await SharedPreferences.getInstance();
 
+    // Check saved mode on startup
+    _isNSFW = prefs.getString('anime_source') == 'hentaivietsub';
+
+    // Load Normal Data
     final favString = prefs.getString('favorites');
     if (favString != null) {
-      final List decoded = jsonDecode(favString);
-      _favorites = decoded.map((e) => AnimeModel.fromJson(e)).toList();
+      _normalFavorites = (jsonDecode(favString) as List).map((e) => AnimeModel.fromJson(e)).toList();
     }
-
     final histString = prefs.getString('history');
     if (histString != null) {
-      final List decoded = jsonDecode(histString);
-      _history = decoded.map((e) => HistoryItem.fromJson(e)).toList();
+      _normalHistory = (jsonDecode(histString) as List).map((e) => HistoryItem.fromJson(e)).toList();
+    }
+
+    // Load NSFW Data
+    final nsfwFavString = prefs.getString('nsfw_favorites');
+    if (nsfwFavString != null) {
+      _nsfwFavorites = (jsonDecode(nsfwFavString) as List).map((e) => AnimeModel.fromJson(e)).toList();
+    }
+    final nsfwHistString = prefs.getString('nsfw_history');
+    if (nsfwHistString != null) {
+      _nsfwHistory = (jsonDecode(nsfwHistString) as List).map((e) => HistoryItem.fromJson(e)).toList();
     }
 
     notifyListeners();
@@ -105,17 +143,15 @@ class UserProvider extends ChangeNotifier {
 
   Future<void> _saveFavorites() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
-      'favorites',
-      jsonEncode(_favorites.map((e) => e.toJson()).toList()),
-    );
+    final key = _isNSFW ? 'nsfw_favorites' : 'favorites';
+    final list = _isNSFW ? _nsfwFavorites : _normalFavorites;
+    await prefs.setString(key, jsonEncode(list.map((e) => e.toJson()).toList()));
   }
 
   Future<void> _saveHistory() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
-      'history',
-      jsonEncode(_history.map((e) => e.toJson()).toList()),
-    );
+    final key = _isNSFW ? 'nsfw_history' : 'history';
+    final list = _isNSFW ? _nsfwHistory : _normalHistory;
+    await prefs.setString(key, jsonEncode(list.map((e) => e.toJson()).toList()));
   }
 }

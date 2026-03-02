@@ -67,7 +67,14 @@ class HentaiVietsubCore {
   static const String searchUrl = 'https://hentaivietsub.com/tim-kiem';
   static const String referer = 'https://p1.spexliu.top/';
   static const String userAgent =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36';
+
+  // Match Python headers exactly to prevent blocks
+  static const Map<String, String> baseHeaders = {
+    'User-Agent': userAgent,
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Accept-Language': 'vi,en-US;q=0.9,en;q=0.8',
+  };
 
   static Future<List<AnimeModel>> getTrending({int page = 1}) async {
     String url = page == 1 ? baseUrl : '$baseUrl/?page=$page';
@@ -83,8 +90,7 @@ class HentaiVietsubCore {
 
   static Future<List<AnimeModel>> _parseList(String url) async {
     try {
-      final res =
-      await http.get(Uri.parse(url), headers: {'User-Agent': userAgent});
+      final res = await http.get(Uri.parse(url), headers: baseHeaders);
       if (res.statusCode != 200) return [];
 
       final List<AnimeModel> items = [];
@@ -119,55 +125,14 @@ class HentaiVietsubCore {
     }
   }
 
+  // Treat as 1 single video (ignoring episodes as requested)
   static Future<List<String>> getEpisodes(String id) async {
-    try {
-      final res =
-      await http.get(Uri.parse(id), headers: {'User-Agent': userAgent});
-      if (res.statusCode != 200) return ["$id|1"];
-
-      final List<String> episodes = [];
-
-      final regex1 = RegExp(
-        r'''<a[^>]+href=["\']([^"\']+)["\'][^>]*>(?:\s*<(?:span|b|strong)[^>]*>)?\s*(?:Tập|Ep(?:isode)?)\s*(\d+)\s*(?:<\/(?:span|b|strong)>)?\s*<\/a>''',
-        caseSensitive: false);
-
-      final regex2 = RegExp(
-        r'''<a[^>]+href=["\']([^"\']+-tap-(\d+)(?:\.html|/|))["\']''',
-        caseSensitive: false);
-
-      for (var m in regex1.allMatches(res.body)) {
-        String link = m.group(1)!;
-        if (!link.startsWith('http')) link = baseUrl + link;
-        episodes.add("$link|${m.group(2)}");
-      }
-
-      for (var m in regex2.allMatches(res.body)) {
-        String link = m.group(1)!;
-        if (!link.startsWith('http')) link = baseUrl + link;
-        episodes.add("$link|${m.group(2)}");
-      }
-
-      final seen = <String>{};
-      final unique = episodes.where((e) => seen.add(e)).toList();
-      unique.sort((a, b) {
-        int na = int.tryParse(a.split('|').last) ?? 0;
-        int nb = int.tryParse(b.split('|').last) ?? 0;
-        return na.compareTo(nb);
-      });
-
-      return unique.isNotEmpty ? unique : ["$id|1"];
-    } catch (e) {
-      print('HentaiVietsub GetEpisodes Error: $e');
-      return ["$id|1"];
-    }
+    return ["1"];
   }
 
-  static Future<String?> getStreamUrl(String id, String episodeNum) async {
+  static Future<String?> getStreamUrl(String url, String episodeNum) async {
     try {
-      String targetUrl = episodeNum.contains('|') ? episodeNum.split('|')[0] : id;
-
-      final res = await http
-      .get(Uri.parse(targetUrl), headers: {'User-Agent': userAgent});
+      final res = await http.get(Uri.parse(url), headers: baseHeaders);
       if (res.statusCode != 200) return null;
 
       final videoIdMatch = RegExp(r'videos/([a-fA-F0-9]{24})').firstMatch(res.body);
@@ -176,11 +141,9 @@ class HentaiVietsubCore {
       if (videoIdMatch != null) {
         videoId = videoIdMatch.group(1);
       } else {
-        final iframeMatch =
-        RegExp(r'''<iframe[^>]+src=["\']([^"\']+)["\']''').firstMatch(res.body);
+        final iframeMatch = RegExp(r'''<iframe[^>]+src=["\']([^"\']+)["\']''').firstMatch(res.body);
         if (iframeMatch != null) {
-          final subMatch =
-          RegExp(r'/([a-fA-F0-9]{24})').firstMatch(iframeMatch.group(1)!);
+          final subMatch = RegExp(r'/([a-fA-F0-9]{24})').firstMatch(iframeMatch.group(1)!);
           if (subMatch != null) videoId = subMatch.group(1);
         }
       }
@@ -188,16 +151,15 @@ class HentaiVietsubCore {
       if (videoId == null) return null;
 
       final configUrl = 'https://p1.spexliu.top/videos/$videoId/config';
-      final apiRes = await http.post(
-        Uri.parse(configUrl),
-        headers: {
-          'User-Agent': userAgent,
-          'Origin': 'https://p1.spexliu.top',
-          'Referer': 'https://p1.spexliu.top/videos/$videoId/play',
-          'Content-Type': 'application/json',
-          'Accept': '*/*'
-        },
-      );
+
+      final apiHeaders = Map<String, String>.from(baseHeaders);
+      apiHeaders.addAll({
+        'Origin': 'https://p1.spexliu.top',
+        'Referer': 'https://p1.spexliu.top/videos/$videoId/play',
+        'Content-Type': 'application/json',
+      });
+
+      final apiRes = await http.post(Uri.parse(configUrl), headers: apiHeaders);
 
       if (apiRes.statusCode == 200) {
         final data = jsonDecode(apiRes.body);
@@ -245,7 +207,6 @@ static Future<List<AnimeModel>> getTrending({int page = 1}) async {
     final List edges = res['data']['shows']['edges'];
     return edges.map((e) => AnimeModel.fromJson(e)).toList();
   } catch (e) {
-    print('AniCore Trending Error: $e');
     return [];
   }
 }
@@ -263,7 +224,6 @@ static Future<List<AnimeModel>> search(String query, {int page = 1}) async {
     final List edges = res['data']['shows']['edges'];
     return edges.map((e) => AnimeModel.fromJson(e)).toList();
   } catch (e) {
-    print('AniCore Search Error: $e');
     return [];
   }
 }
@@ -308,18 +268,14 @@ try {
       }
     }
   }
-} catch (e) {
-  print('AniCore Stream Error: $e');
-}
+} catch (e) {}
 return null;
 }
 
 static Future<Map<String, dynamic>> _get(
   String query, Map<String, dynamic> vars) async {
-    final uri =
-    Uri.parse('$baseUrl?variables=${jsonEncode(vars)}&query=$query');
-    final res = await http
-    .get(uri, headers: {'User-Agent': agent, 'Referer': referer});
+    final uri = Uri.parse('$baseUrl?variables=${jsonEncode(vars)}&query=$query');
+    final res = await http.get(uri, headers: {'User-Agent': agent, 'Referer': referer});
     if (res.statusCode == 200) return jsonDecode(res.body);
     throw Exception('AniCore API Error ${res.statusCode}');
   }
@@ -348,65 +304,6 @@ static Future<Map<String, dynamic>> _get(
     }
     return buf.toString();
   }
-}
-
-// ════════════════════════════════════════════════════════════════════════════
-// ANIME API  (legacy search wrapper)
-// ════════════════════════════════════════════════════════════════════════════
-
-class AnimeApi {
-  static const String _baseUrl   = 'https://api.allanime.day/api';
-  static const String _referer   = 'https://allmanga.to';
-  static const String _userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
-  '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
-
-  static const String _searchGql = r'''
-  query($search: SearchInput, $limit: Int, $page: Int, $translationType: VaildTranslationTypeEnumType, $countryOrigin: VaildCountryOriginEnumType) {
-  shows(search: $search, limit: $limit, page: $page, translationType: $translationType, countryOrigin: $countryOrigin) {
-  edges { _id name thumbnail availableEpisodes }
-}
-}
-''';
-
-static Future<List<Anime>> search(String query) async {
-  final variables = {
-    'search': {'allowAdult': false, 'allowUnknown': false, 'query': query},
-    'limit': 40, 'page': 1, 'translationType': 'sub', 'countryOrigin': 'ALL',
-  };
-  try {
-    final res = await http.get(
-      Uri.parse('$_baseUrl?variables=${jsonEncode(variables)}&query=$_searchGql'),
-      headers: {'User-Agent': _userAgent, 'Referer': _referer},
-    );
-    if (res.statusCode == 200) {
-      final List edges = jsonDecode(res.body)['data']['shows']['edges'];
-      return edges.map((e) => Anime.fromJson(e)).toList();
-    }
-  } catch (e) {
-    print('AnimeApi Search Error: $e');
-  }
-  return [];
-}
-}
-
-class Anime {
-  final String id;
-  final String name;
-  final String? thumbnail;
-  final dynamic availableEpisodes;
-
-  Anime({required this.id, required this.name, this.thumbnail, this.availableEpisodes});
-
-  factory Anime.fromJson(Map<String, dynamic> json) => Anime(
-    id: json['_id'] ?? '',
-    name: json['name'] ?? 'Unknown',
-    thumbnail: json['thumbnail'],
-    availableEpisodes: json['availableEpisodes'],
-  );
-
-  String get fullImageUrl => thumbnail != null
-  ? 'https://wp.youtube-anime.com/alldata/$thumbnail'
-  : 'https://via.placeholder.com/300x450';
 }
 
 // ════════════════════════════════════════════════════════════════════════════

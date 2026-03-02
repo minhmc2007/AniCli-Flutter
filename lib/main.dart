@@ -25,8 +25,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 // --- APP CONSTANTS ---
-const String kAppVersion = "1.8.1";
-const String kBuildNumber = "181";
+const String kAppVersion = "1.8.0";
+const String kBuildNumber = "180";
 const kColorCream = Color(0xFFFEEAC9);
 const kColorPeach = Color(0xFFFFCDC9);
 const kColorSoftPink = Color(0xFFFDACAC);
@@ -461,6 +461,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 class SourceSelectScreen extends StatelessWidget { const SourceSelectScreen({super.key});
 Future<void> _go(BuildContext context, AnimeSource source) async {
   await context.read<SourceProvider>().setSource(source);
+  if (context.mounted) context.read<UserProvider>().setMode(source == AnimeSource.hentaivietsub);
   if (context.mounted) Navigator.of(context).pushReplacement(PageRouteBuilder(pageBuilder: (_,__,___) => const MainScreen(), transitionsBuilder: (_, a, __, c) => FadeTransition(opacity: a, child: c), transitionDuration: const Duration(milliseconds: 600)));
 }
 @override Widget build(BuildContext context) => Scaffold(body: Container(decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors:[Color(0xFFFFF8F0), kColorCream])), child: Stack(fit: StackFit.expand, children:[
@@ -870,8 +871,23 @@ class HistoryView extends StatefulWidget { final Function(AnimeModel, String) on
 class _HistoryViewState extends State<HistoryView> with AutomaticKeepAliveClientMixin {
   @override bool get wantKeepAlive => true;
   @override Widget build(BuildContext context) {
-    super.build(context); final history = context.watch<UserProvider>().history; final isMobile = MediaQuery.of(context).size.width < 900; final t = context.watch<SettingsProvider>().tier;
-    return Column(children:[const SizedBox(height: 60), Row(mainAxisAlignment: MainAxisAlignment.center, children:[Text("History", style: GoogleFonts.inter(fontSize: 32, fontWeight: FontWeight.bold, color: kColorCoral)), if (history.isNotEmpty) Padding(padding: const EdgeInsets.only(left: 10), child: IconButton(icon: const Icon(LucideIcons.trash2, size: 20, color: kColorDarkText), onPressed: () => context.read<UserProvider>().clearHistory()))]).adapt(t), const SizedBox(height: 20), Expanded(child: history.isEmpty ? Center(child: Column(mainAxisSize: MainAxisSize.min, children:[Icon(LucideIcons.ghost, size: 60, color: kColorCoral.withOpacity(0.5)), const SizedBox(height: 10), Text("Nothing here yet...", style: GoogleFonts.inter(color: Colors.black45, fontSize: 16))])) : ListView.builder(padding: EdgeInsets.symmetric(horizontal: isMobile ? 20 : 40, vertical: 10), physics: const BouncingScrollPhysics(), itemCount: history.length, itemBuilder: (ctx, i) => HistoryCard(item: history[i], onTap: () => widget.onAnimeTap(history[i].anime, "history_${history[i].anime.id}")).simpleDrop(t, delay: i > 8 ? 0 : i * 50)))]);
+    super.build(context);
+    final isNSFW = context.watch<UserProvider>().isNSFW;
+    final history = context.watch<UserProvider>().history;
+    final isMobile = MediaQuery.of(context).size.width < 900;
+    final t = context.watch<SettingsProvider>().tier;
+
+    return Column(children:[
+      const SizedBox(height: 60),
+      Row(mainAxisAlignment: MainAxisAlignment.center, children:[
+        Text(isNSFW ? "Incognito History" : "History", style: GoogleFonts.inter(fontSize: 32, fontWeight: FontWeight.bold, color: kColorCoral)),
+        if (history.isNotEmpty) Padding(padding: const EdgeInsets.only(left: 10), child: IconButton(icon: const Icon(LucideIcons.trash2, size: 20, color: kColorDarkText), onPressed: () => context.read<UserProvider>().clearHistory()))
+      ]).adapt(t),
+      const SizedBox(height: 20),
+      Expanded(child: history.isEmpty
+      ? Center(child: Column(mainAxisSize: MainAxisSize.min, children:[Icon(isNSFW ? LucideIcons.eyeOff : LucideIcons.ghost, size: 60, color: kColorCoral.withOpacity(0.5)), const SizedBox(height: 10), Text(isNSFW ? "No secrets here yet..." : "Nothing here yet...", style: GoogleFonts.inter(color: Colors.black45, fontSize: 16))]))
+      : ListView.builder(padding: EdgeInsets.symmetric(horizontal: isMobile ? 20 : 40, vertical: 10), physics: const BouncingScrollPhysics(), itemCount: history.length, itemBuilder: (ctx, i) => HistoryCard(item: history[i], onTap: () => widget.onAnimeTap(history[i].anime, "history_${history[i].anime.id}")).simpleDrop(t, delay: i > 8 ? 0 : i * 50)))
+    ]);
   }
 }
 
@@ -879,8 +895,19 @@ class FavoritesView extends StatefulWidget { final Function(AnimeModel, String) 
 class _FavoritesViewState extends State<FavoritesView> with AutomaticKeepAliveClientMixin {
   @override bool get wantKeepAlive => true;
   @override Widget build(BuildContext context) {
-    super.build(context); final favorites = context.watch<UserProvider>().favorites; final t = context.watch<SettingsProvider>().tier;
-    return Column(children:[const SizedBox(height: 60), Text("Favorites", style: GoogleFonts.inter(fontSize: 32, fontWeight: FontWeight.bold, color: kColorCoral)).adapt(t, slideY: true, slideBegin: -0.5), const SizedBox(height: 20), Expanded(child: favorites.isEmpty ? Center(child: Text("No favorites yet!", style: GoogleFonts.inter(color: Colors.black26))) : AnimeGrid(animes: favorites, onTap: widget.onAnimeTap, physics: const BouncingScrollPhysics(), shrinkWrap: false, tagPrefix: "fav"))]);
+    super.build(context);
+    final isNSFW = context.watch<UserProvider>().isNSFW;
+    final favorites = context.watch<UserProvider>().favorites;
+    final t = context.watch<SettingsProvider>().tier;
+
+    return Column(children:[
+      const SizedBox(height: 60),
+      Text(isNSFW ? "Dark Favorites" : "Favorites", style: GoogleFonts.inter(fontSize: 32, fontWeight: FontWeight.bold, color: kColorCoral)).adapt(t, slideY: true, slideBegin: -0.5),
+      const SizedBox(height: 20),
+      Expanded(child: favorites.isEmpty
+      ? Center(child: Text(isNSFW ? "Your stash is empty." : "No favorites yet!", style: GoogleFonts.inter(color: Colors.black26)))
+      : AnimeGrid(animes: favorites, onTap: widget.onAnimeTap, physics: const BouncingScrollPhysics(), shrinkWrap: false, tagPrefix: "fav"))
+    ]);
   }
 }
 
@@ -980,9 +1007,13 @@ class _SettingsViewState extends State<SettingsView> {
                           ]
                         )
                       );
-                      if (confirm == true) tp.setSource(v);
+                      if (confirm == true) {
+                        tp.setSource(v);
+                        context.read<UserProvider>().setMode(true);
+                      }
                     } else {
                       tp.setSource(v);
+                      context.read<UserProvider>().setMode(v == AnimeSource.hentaivietsub);
                     }
                   }
                 }
@@ -1179,7 +1210,7 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
     final referer = useVi ? ViAnimeCore.referer : (isNSFW ? HentaiVietsubCore.referer : AniCore.referer);
 
     // For UI Display
-    String displayEpNum = idNum.contains('|') ? idNum.split('|')[1] : idNum;
+    String displayEpNum = idNum;
 
     if (_isDownloadMode) {
       if (Platform.isAndroid || Platform.isIOS) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Download unavailable on mobile yet."))); return; }
