@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="banner.png" alt="Ani-Cli Flutter Banner">
+</p>
+
 # 🌸 Ani-Cli Flutter
 
 ![Flutter](https://img.shields.io/badge/Flutter-%2302569B.svg?style=for-the-badge&logo=Flutter&logoColor=white)
@@ -26,7 +30,7 @@
     *   **Internal Player**: No external dependencies required! Just enable it in `Settings > General > Use internal player` to watch immediately.
     *   **System MPV**: Connects to your local MPV installation for maximum hardware acceleration and custom configuration.
 *   **❤️ Favorites**: Save your favorite anime and manga for quick access.
-*   **clock History**: Automatically tracks watched episodes / read chapters and saves your progress locally.
+*   **🕒 History**: Automatically tracks watched episodes / read chapters and saves your progress locally.
 *   **🔍 Powerful Search**: Scrapes `AllAnime` API for a vast library of Sub/Dub anime and `MangaDex` for manga.
 *   **✨ Animations**: Smooth Hero transitions, staggered list animations, and hover effects using `flutter_animate`.
 
@@ -63,7 +67,7 @@ brew install mpv
 
 ### 1. Clone the Repository
 ```bash
-git clone https://github.com/ minhmc2007/ani-cli-flutter.git
+git clone https://github.com/minhmc2007/ani-cli-flutter.git
 cd ani-cli-flutter
 ```
 
