@@ -24,16 +24,18 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-// --- APP CONSTANTS ---
-const String kAppVersion = "1.8.2";
-const String kBuildNumber = "182";
+/*
+ * Global Definitions & App State
+ * Defines theme colors and main entry points.
+ */
+const String kAppVersion = "1.8.3";
+const String kBuildNumber = "183";
 const kColorCream = Color(0xFFFEEAC9);
 const kColorPeach = Color(0xFFFFCDC9);
 const kColorSoftPink = Color(0xFFFDACAC);
 const kColorCoral = Color(0xFFFD7979);
 const kColorDarkText = Color(0xFF4A2B2B);
 
-// --- MAIN ENTRY POINT ---
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
@@ -51,6 +53,7 @@ Future<void> main() async {
 class AniCliApp extends StatelessWidget {
   final bool isFirstLaunch;
   const AniCliApp({super.key, required this.isFirstLaunch});
+
   @override Widget build(BuildContext context) {
     context.read<SettingsProvider>().initPerformanceMode();
     return MaterialApp(
@@ -75,10 +78,10 @@ class AniCliApp extends StatelessWidget {
   }
 }
 
-// ==========================================
-// PROVIDERS
-// ==========================================
-
+/*
+ * Providers
+ * Manages reactive states for settings, sources, and read/watch history.
+ */
 class SourceProvider extends ChangeNotifier {
   AnimeSource _source = AnimeSource.en;
   AnimeSource get source => _source;
@@ -116,7 +119,9 @@ class MangaSourceProvider extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     final saved = prefs.getString('manga_source');
     if (saved != null) {
-      _source = saved == 'mangadex' ? MangaSource.mangadex : MangaSource.allanime;
+      if (saved == 'mangadex') _source = MangaSource.mangadex;
+      else if (saved == 'zettruyen') _source = MangaSource.zettruyen;
+      else _source = MangaSource.allanime;
       notifyListeners();
     }
   }
@@ -124,7 +129,7 @@ class MangaSourceProvider extends ChangeNotifier {
   Future<void> setSource(MangaSource s) async {
     _source = s;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('manga_source', s == MangaSource.mangadex ? 'mangadex' : 'allanime');
+    await prefs.setString('manga_source', s.name);
     notifyListeners();
   }
 }
@@ -189,9 +194,10 @@ class ProgressProvider extends ChangeNotifier {
   int getProgress(String animeId, String epNum) => _progress["${animeId}_$epNum"] ?? 0;
 }
 
-// ==========================================
-// UTILS & EXTENSIONS
-// ==========================================
+/*
+ * Utilities & UI Extensions
+ * Hardware diagnostics, animations, and specialized UI wrappers.
+ */
 class MemoryUtils {
   static Future<double> getTotalRamGB() async {
     try {
@@ -204,7 +210,7 @@ class MemoryUtils {
         final lines = res.stdout.toString().trim().split('\n');
         if (lines.length >= 2) return (int.tryParse(lines[1].trim()) ?? 0) / 1024 / 1024 / 1024;
       } else if (Platform.isMacOS) {
-        final res = await Process.run('sysctl', ['-n', 'hw.memsize']);
+        final res = await Process.run('sysctl',['-n', 'hw.memsize']);
         return (int.tryParse(res.stdout.toString().trim()) ?? 0) / 1024 / 1024 / 1024;
       }
     } catch (_) {}
@@ -228,9 +234,10 @@ extension AnimExt on Widget {
 
 extension LetExt<T> on T { R let<R>(R Function(T) cb) => cb(this); }
 
-// ==========================================
-// SERVICES & GENERIC DIALOGS
-// ==========================================
+/*
+ * Updater & Services
+ * Handles cross-platform binary updates directly from GitHub releases.
+ */
 class UpdaterService {
   static const String _releaseUrl = "https://api.github.com/repos/minhmc2007/AniCli-Flutter/releases/latest";
   static String? _extractSemVer(String raw) => RegExp(r'(\d+)\.(\d+)(\.(\d+))?').firstMatch(raw)?.let((m) => "${m.group(1) ?? '0'}.${m.group(2) ?? '0'}.${m.group(4) ?? '0'}");
@@ -348,9 +355,10 @@ class _GenericDownloadDialogState extends State<GenericDownloadDialog> {
   ))).animate().fadeIn().scale(curve: Curves.easeOutBack));
 }
 
-// ==========================================
-// COMMON UI WIDGETS
-// ==========================================
+/*
+ * Shared Views & Animations
+ * Thematic backgrounds and glassmorphic UI elements.
+ */
 class LiquidGlassContainer extends StatelessWidget {
   final Widget child; final double blur, opacity; final BorderRadius? borderRadius; final Border? border;
   const LiquidGlassContainer({super.key, required this.child, this.blur=15, this.opacity=0.4, this.borderRadius, this.border});
@@ -376,6 +384,7 @@ class _CozyHeroImageState extends State<CozyHeroImage> {
   Map<String, String>? _getHeaders(String url) {
     if (url.contains('youtu-chan') || url.contains('fast4speed')) return AllMangaCore.pageHeaders;
     else if (url.contains('wp.youtube-anime.com') || url.contains('allanime') || url.contains('allmanga')) return AllMangaCore.coverHeaders;
+    else if (url.contains('zetimage.com')) return const {'referer': 'https://www.zettruyen.africa/'};
     return null;
   }
 
@@ -432,9 +441,10 @@ class FloatingOrbsBackground extends StatelessWidget {
   }
 }
 
-// ==========================================
-// ONBOARDING & SETUP SCREENS
-// ==========================================
+/*
+ * OOBE Setup Screens
+ * Shown exclusively on first launch.
+ */
 class OnboardingScreen extends StatefulWidget { const OnboardingScreen({super.key}); @override State<OnboardingScreen> createState() => _OnboardingScreenState(); }
 class _OnboardingScreenState extends State<OnboardingScreen> {
   final List<String> _greetings =["Welcome", "こんにちは", "AniCli"]; int _idx = 0; Timer? _timer; bool _isFinished = false;
@@ -479,9 +489,10 @@ class _SourceOpt extends StatelessWidget {
   ])))));
 }
 
-// ==========================================
-// MAIN APP NAVIGATION
-// ==========================================
+/*
+ * Main Shell UI
+ * Top level routing and app bar layout logic.
+ */
 class MainScreen extends StatefulWidget { const MainScreen({super.key}); @override State<MainScreen> createState() => _MainScreenState(); }
 class _MainScreenState extends State<MainScreen> {
   int _idx = 0; final GlobalKey _hKey = GlobalKey(), _fKey = GlobalKey(), _sKey = GlobalKey();
@@ -508,9 +519,10 @@ class _MainScreenState extends State<MainScreen> {
   }
 }
 
-// ==========================================
-// MANGA READER & INTERNAL PLAYER
-// ==========================================
+/*
+ * Specialized Players
+ * Native manga reading components and integrated MPV implementation.
+ */
 class MangaReaderScreen extends StatefulWidget {
   final AnimeModel anime; final String chapterNum; final List<String> allChapters;
   const MangaReaderScreen({super.key, required this.anime, required this.chapterNum, required this.allChapters});
@@ -519,21 +531,30 @@ class MangaReaderScreen extends StatefulWidget {
 class _MangaReaderScreenState extends State<MangaReaderScreen> {
   bool _isLoading = true, _showControls = true, _isCtrlPressed = false; List<String> _pages =[]; int _pointerCount = 0;
   final TransformationController _tCtrl = TransformationController(); final ScrollController _sCtrl = ScrollController();
+  
   @override void initState() { super.initState(); _loadPages(); }
+  
   Future<void> _loadPages() async {
     setState(() => _isLoading = true);
-    final pages = widget.anime.sourceId == 'allanime'
-    ? await AllMangaCore.getPages(widget.anime.id, widget.chapterNum)
-    : await MangaCore.getPages(widget.chapterNum);
+    final src = widget.anime.sourceId;
+    final pages = src == 'zettruyen'
+      ? await ZetTruyenCore.getPages(widget.anime.id, widget.chapterNum)
+      : src == 'allanime'
+        ? await AllMangaCore.getPages(widget.anime.id, widget.chapterNum)
+        : await MangaCore.getPages(widget.chapterNum);
+        
     if (mounted) setState(() { _pages = pages; _isLoading = false; });
   }
+
   void _nav(String newChap) {
     context.read<UserProvider>().addToHistory(widget.anime, newChap);
     Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => MangaReaderScreen(anime: widget.anime, chapterNum: newChap, allChapters: widget.allChapters)));
   }
+
   Future<void> _downloadImage(String url, int index) async {
     try {
-      final headers = widget.anime.sourceId == 'allanime' ? AllMangaCore.pageHeaders : const {"User-Agent": "AniCli/1.0"};
+      final src = widget.anime.sourceId;
+      final headers = src == 'allanime' ? AllMangaCore.pageHeaders : src == 'zettruyen' ? const {'referer': 'https://www.zettruyen.africa/'} : const {"User-Agent": "AniCli/1.0"};
       final res = await http.get(Uri.parse(url), headers: headers);
       if (res.statusCode == 200) {
         final dir = Platform.isAndroid ? await getExternalStorageDirectory() : await getDownloadsDirectory();
@@ -547,6 +568,9 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
 
   @override Widget build(BuildContext context) {
     final idx = widget.allChapters.indexOf(widget.chapterNum);
+    final src = widget.anime.sourceId;
+    final headers = src == 'allanime' ? AllMangaCore.pageHeaders : src == 'zettruyen' ? const {'referer': 'https://www.zettruyen.africa/'} : const {"User-Agent": "AniCli/1.0"};
+
     return Scaffold(backgroundColor: Colors.black, body: KeyboardListener(focusNode: FocusNode()..requestFocus(), onKeyEvent: (e) { if (e.logicalKey == LogicalKeyboardKey.controlLeft || e.logicalKey == LogicalKeyboardKey.controlRight) setState(() => _isCtrlPressed = e is KeyDownEvent || e is KeyRepeatEvent); }, child: Stack(children:[
       Listener(
         onPointerDown: (_) => setState(() => _pointerCount++), onPointerUp: (_) => setState(() => _pointerCount--), onPointerCancel: (_) => setState(() => _pointerCount = 0),
@@ -567,7 +591,7 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
             if (idx < widget.allChapters.length - 1) ElevatedButton(onPressed: () => _nav(widget.allChapters[idx + 1]), style: ElevatedButton.styleFrom(backgroundColor: Colors.grey[800]), child: const Text("Previous Chapter", style: TextStyle(color: Colors.white))),
               if (idx > 0) ElevatedButton(onPressed: () => _nav(widget.allChapters[idx - 1]), style: ElevatedButton.styleFrom(backgroundColor: kColorCoral), child: const Text("Next Chapter", style: TextStyle(color: Colors.white)))
           ]));
-          return GestureDetector(onLongPress: () => _downloadImage(_pages[i], i+1), onSecondaryTap: () => _downloadImage(_pages[i], i+1), child: Container(alignment: Alignment.center, color: Colors.black, child: CachedNetworkImage(imageUrl: _pages[i], fit: BoxFit.contain, width: double.infinity, placeholder: (_,__) => const SizedBox(height: 300, child: Center(child: CircularProgressIndicator(color: kColorCoral, strokeWidth: 2))), errorWidget: (_,__,___) => const SizedBox(height: 200, child: Center(child: Icon(Icons.broken_image, color: Colors.white54))), httpHeaders: widget.anime.sourceId == 'allanime' ? AllMangaCore.pageHeaders : const {"User-Agent": "AniCli/1.0"})));
+          return GestureDetector(onLongPress: () => _downloadImage(_pages[i], i+1), onSecondaryTap: () => _downloadImage(_pages[i], i+1), child: Container(alignment: Alignment.center, color: Colors.black, child: CachedNetworkImage(imageUrl: _pages[i], fit: BoxFit.contain, width: double.infinity, placeholder: (_,__) => const SizedBox(height: 300, child: Center(child: CircularProgressIndicator(color: kColorCoral, strokeWidth: 2))), errorWidget: (_,__,___) => const SizedBox(height: 200, child: Center(child: Icon(Icons.broken_image, color: Colors.white54))), httpHeaders: headers)));
         })))),
         AnimatedPositioned(duration: const Duration(milliseconds: 300), top: _showControls ? 0 : -100, left: 0, right: 0, child: Container(color: Colors.black.withOpacity(0.8), padding: const EdgeInsets.all(10), child: SafeArea(bottom: false, child: Row(children:[IconButton(icon: const Icon(Icons.arrow_back, color: Colors.white), onPressed: () => Navigator.pop(context)), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children:[Text(widget.anime.name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold), maxLines: 1), Text("Chapter ${widget.chapterNum.contains('|') ? widget.chapterNum.split('|')[1] : widget.chapterNum}", style: const TextStyle(color: kColorCoral, fontSize: 12))]))]))))
     ])));
@@ -644,7 +668,7 @@ class _CustomMobileControlsState extends State<CustomMobileControls> {
   bool _isDrag = false; double _val = 0.0;
   @override Widget build(BuildContext context) => Container(decoration: const BoxDecoration(gradient: LinearGradient(colors:[Colors.black54, Colors.transparent, Colors.black54], begin: Alignment.topCenter, end: Alignment.bottomCenter, stops:[0.0, 0.5, 1.0])), child: Column(children:[
     Container(height: 56, padding: const EdgeInsets.symmetric(horizontal: 8), child: Row(children:[IconButton(icon: const Icon(Icons.arrow_back, color: Colors.white), onPressed: widget.onClose), Expanded(child: Text(widget.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)))])), const Expanded(child: SizedBox()),
-    Container(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10), child: Column(children: [
+    Container(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10), child: Column(children:[
       Row(children:[
         StreamBuilder<Duration>(stream: widget.c.player.stream.position, initialData: widget.c.player.state.position, builder: (ctx, s) => Text(widget.fmt(_isDrag ? Duration(seconds: _val.toInt()) : (s.data ?? Duration.zero)), style: const TextStyle(color: Colors.white, fontSize: 12))), const SizedBox(width: 10),
         Expanded(child: StreamBuilder<Duration>(stream: widget.c.player.stream.position, initialData: widget.c.player.state.position, builder: (ctx, ps) => StreamBuilder<Duration>(stream: widget.c.player.stream.duration, initialData: widget.c.player.state.duration, builder: (ctx, ds) {
@@ -678,9 +702,10 @@ class _CenterPlayButtonState extends State<CenterPlayButton> with TickerProvider
   ])));
 }
 
-// ==========================================
-// VIEWS
-// ==========================================
+/*
+ * Navigational Views
+ * Browse view, settings, and general core screens.
+ */
 class BrowseView extends StatefulWidget { final Function(AnimeModel, String) onAnimeTap; const BrowseView({super.key, required this.onAnimeTap}); @override State<BrowseView> createState() => _BrowseViewState(); }
 class _BrowseViewState extends State<BrowseView> with AutomaticKeepAliveClientMixin {
   final TextEditingController _sCtrl = TextEditingController();
@@ -707,13 +732,22 @@ class _BrowseViewState extends State<BrowseView> with AutomaticKeepAliveClientMi
     final useVi = src == AnimeSource.vi;
     final isNSFW = src == AnimeSource.hentaivietsub;
 
-    final res = _isMangaMode
-    ? (_query.isEmpty
-    ? (mangaSrc == MangaSource.allanime ? await AllMangaCore.getTrending() : await MangaCore.getTrending())
-    : (mangaSrc == MangaSource.allanime ? await AllMangaCore.search(_query) : await MangaCore.search(_query)))
-    : (_query.isEmpty
-    ? (useVi ? await ViAnimeCore.getTrending(page: _page) : (isNSFW ? await HentaiVietsubCore.getTrending(page: _page) : await AniCore.getTrending(page: _page)))
-    : (useVi ? await ViAnimeCore.search(_query, page: _page) : (isNSFW ? await HentaiVietsubCore.search(_query, page: _page) : await AniCore.search(_query, page: _page))));
+    List<AnimeModel> res =[];
+    if (_isMangaMode) {
+      if (_query.isEmpty) {
+        if (mangaSrc == MangaSource.zettruyen) res = await ZetTruyenCore.getTrending();
+        else if (mangaSrc == MangaSource.allanime) res = await AllMangaCore.getTrending();
+        else res = await MangaCore.getTrending();
+      } else {
+        if (mangaSrc == MangaSource.zettruyen) res = await ZetTruyenCore.search(_query);
+        else if (mangaSrc == MangaSource.allanime) res = await AllMangaCore.search(_query);
+        else res = await MangaCore.search(_query);
+      }
+    } else {
+      res = _query.isEmpty
+      ? (useVi ? await ViAnimeCore.getTrending(page: _page) : (isNSFW ? await HentaiVietsubCore.getTrending(page: _page) : await AniCore.getTrending(page: _page)))
+      : (useVi ? await ViAnimeCore.search(_query, page: _page) : (isNSFW ? await HentaiVietsubCore.search(_query, page: _page) : await AniCore.search(_query, page: _page)));
+    }
 
     if (mounted) setState(() { _items = res; _isLoading = false; });
   }
@@ -805,11 +839,11 @@ class _BrowseViewState extends State<BrowseView> with AutomaticKeepAliveClientMi
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     children:[
                                       Text(
-                                        mangaSrc == MangaSource.mangadex ? "MangaDex" : "AllManga",
+                                        mangaSrc == MangaSource.mangadex ? "MangaDex" : mangaSrc == MangaSource.zettruyen ? "ZetTruyen" : "AllManga",
                                         style: GoogleFonts.outfit(fontSize: 40, fontWeight: FontWeight.bold, color: kColorDarkText),
                                       ),
                                       Text(
-                                        mangaSrc == MangaSource.mangadex ? "Read the world's library" : "The best manga reader",
+                                        mangaSrc == MangaSource.mangadex ? "Read the world's library" : mangaSrc == MangaSource.zettruyen ? "Truyện tranh Tiếng Việt" : "The best manga reader",
                                         style: GoogleFonts.inter(fontSize: 16, color: kColorDarkText.withOpacity(0.6)),
                                       ),
                                     ],
@@ -824,13 +858,12 @@ class _BrowseViewState extends State<BrowseView> with AutomaticKeepAliveClientMi
                       Padding(padding: EdgeInsets.only(left: isMobile ? 20 : 40, bottom: 15), child: Text(_query.isEmpty ? (_isMangaMode ? "Popular Updates" : (isNSFW ? "Latest Updates" : "Trending Anime")) : "Results", style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.bold, color: kColorDarkText))).adapt(t, delay: 200, slideY: true),
                       AnimeGrid(animes: _items, onTap: widget.onAnimeTap, tagPrefix: "browse"),
 
-                      // Pagination controls
                       if (!_isMangaMode)
                         Padding(
                           padding: const EdgeInsets.symmetric(vertical: 40),
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
+                            children:[
                               if (_page > 1)
                                 ElevatedButton.icon(
                                   onPressed: () => _changePage(-1),
@@ -995,9 +1028,9 @@ class _SettingsViewState extends State<SettingsView> {
                         context: context,
                         builder: (ctx) => AlertDialog(
                           backgroundColor: kColorCream,
-                          title: const Row(children: [Icon(LucideIcons.alertTriangle, color: kColorCoral), SizedBox(width: 10), Text("Age Warning (18+)", style: TextStyle(color: kColorCoral, fontWeight: FontWeight.bold))]),
+                          title: const Row(children:[Icon(LucideIcons.alertTriangle, color: kColorCoral), SizedBox(width: 10), Text("Age Warning (18+)", style: TextStyle(color: kColorCoral, fontWeight: FontWeight.bold))]),
                           content: const Text("This source contains adult-only (NSFW) content.\n\nAre you 18 years or older and wish to proceed?"),
-                          actions: [
+                          actions:[
                             TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Cancel", style: TextStyle(color: Colors.black54))),
                             ElevatedButton(
                               style: ElevatedButton.styleFrom(backgroundColor: kColorCoral, foregroundColor: Colors.white),
@@ -1040,6 +1073,7 @@ class _SettingsViewState extends State<SettingsView> {
                 items: const[
                   DropdownMenuItem(value: MangaSource.allanime, child: Text("AllManga (allanime.day · Default)")),
                   DropdownMenuItem(value: MangaSource.mangadex, child: Text("MangaDex (Multi-lang · R18)")),
+                  DropdownMenuItem(value: MangaSource.zettruyen, child: Text("ZetTruyen (Tiếng Việt)")),
                 ],
                 onChanged: (v) { if (v != null) mp.setSource(v); }
               )
@@ -1178,9 +1212,11 @@ class _SettingsViewState extends State<SettingsView> {
     );
   }
 }
-// ==========================================
-// DETAILS
-// ==========================================
+
+/*
+ * Detailed Anime/Manga Display
+ * Renders individual pages with chapters and episode lists.
+ */
 class AnimeDetailView extends StatefulWidget { final AnimeModel anime; final String heroTag; const AnimeDetailView({super.key, required this.anime, required this.heroTag}); @override State<AnimeDetailView> createState() => _AnimeDetailViewState(); }
 class _AnimeDetailViewState extends State<AnimeDetailView> {
   List<String> _episodes =[]; bool _isLoading = true, _isDownloadMode = false; String? _loadingStatus;
@@ -1192,12 +1228,16 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
     final useVi = src == 'vi';
     final isNSFW = src == 'hentaivietsub';
 
-    final items = widget.anime.isManga
-    ? (src == 'allanime'
-    ? await AllMangaCore.getChapters(widget.anime.id)
-    : await MangaCore.getChapters(widget.anime.id))
-    : (useVi ? await ViAnimeCore.getEpisodes(widget.anime.id) : (isNSFW ? await HentaiVietsubCore.getEpisodes(widget.anime.id) : await AniCore.getEpisodes(widget.anime.id)));
-    if (mounted) setState(() { _episodes = items; _isLoading = false; });
+    List<dynamic> items =[];
+    if (widget.anime.isManga) {
+      if (src == 'zettruyen') items = await ZetTruyenCore.getChapters(widget.anime.id);
+      else if (src == 'allanime') items = await AllMangaCore.getChapters(widget.anime.id);
+      else items = await MangaCore.getChapters(widget.anime.id);
+    } else {
+      items = useVi ? await ViAnimeCore.getEpisodes(widget.anime.id) : (isNSFW ? await HentaiVietsubCore.getEpisodes(widget.anime.id) : await AniCore.getEpisodes(widget.anime.id));
+    }
+    
+    if (mounted) setState(() { _episodes = List<String>.from(items); _isLoading = false; });
   }
 
   Future<void> _handleItemTap(String idNum) async {
@@ -1209,7 +1249,6 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
     final isNSFW = widget.anime.sourceId == 'hentaivietsub';
     final referer = useVi ? ViAnimeCore.referer : (isNSFW ? HentaiVietsubCore.referer : AniCore.referer);
 
-    // For UI Display
     String displayEpNum = idNum;
 
     if (_isDownloadMode) {
