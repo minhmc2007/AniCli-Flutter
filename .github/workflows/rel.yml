@@ -6,7 +6,7 @@ on:
       version:
         description: 'Release Version (e.g. v1.0.1)'
         required: true
-        default: 'v1.0.1'
+        default: 'v1.8.5'
 
 permissions:
   contents: write
@@ -269,16 +269,12 @@ jobs:
         run: flutter pub get
       - name: Build APK
         run: flutter build apk --release
-      
-      # Rename APK so it looks neat in the GitHub Release
-      - name: Rename APK
-        run: mv build/app/outputs/flutter-apk/app-release.apk anicli-android.apk
 
       - name: Upload Android Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Android-APK
-          path: anicli-android.apk
+          path: build/app/outputs/flutter-apk/app-release.apk
 
   # --- MACOS BUILD ---
   build-macos:
@@ -398,7 +394,7 @@ jobs:
           | **Windows (Portable)** | \`anicli-windows-portable.zip\` |
           | **Linux (AppImage)** | \`anicli-linux-x64.AppImage\` |
           | **Linux (Portable)** | \`anicli-linux-portable.tar.gz\` |
-          | **Android** | \`anicli-android.apk\` |
+          | **Android** | \`app-release.apk\` |
           | **macOS** | \`anicli-macos.zip\` |
           | **iOS** | \`anicli-unsigned.ipa\` (Unsigned) |
           EOF
@@ -416,6 +412,6 @@ jobs:
             anicli-windows-portable.zip
             anicli-linux-x64.AppImage
             anicli-linux-portable.tar.gz
-            anicli-android.apk
+            app-release.apk
             anicli-macos.zip
             anicli-unsigned.ipa
