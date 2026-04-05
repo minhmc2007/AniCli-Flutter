@@ -11,7 +11,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
-import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:lucide_icons/lucide_icons.dart';
@@ -28,8 +28,8 @@ import 'package:url_launcher/url_launcher.dart';
  * Global Definitions & App State
  * Defines theme colors and main entry points.
  */
-const String kAppVersion = "1.8.3";
-const String kBuildNumber = "183";
+const String kAppVersion = "1.8.4";
+const String kBuildNumber = "184";
 const kColorCream = Color(0xFFFEEAC9);
 const kColorPeach = Color(0xFFFFCDC9);
 const kColorSoftPink = Color(0xFFFDACAC);

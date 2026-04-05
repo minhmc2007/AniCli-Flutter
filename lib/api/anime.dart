@@ -72,7 +72,8 @@ class HentaiVietsubCore {
   // Match Python headers exactly to prevent blocks
   static const Map<String, String> baseHeaders = {
     'User-Agent': userAgent,
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Accept':
+    'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
     'Accept-Language': 'vi,en-US;q=0.9,en;q=0.8',
   };
 
@@ -91,20 +92,23 @@ class HentaiVietsubCore {
   static Future<List<AnimeModel>> _parseList(String url) async {
     try {
       final res = await http.get(Uri.parse(url), headers: baseHeaders);
-      if (res.statusCode != 200) return [];
+      if (res.statusCode != 200) return[];
 
-      final List<AnimeModel> items = [];
+      final List<AnimeModel> items =[];
       final parts = res.body.split(RegExp(r'''class=["\']item-box["\'][^>]*>'''));
 
       for (int i = 1; i < parts.length; i++) {
         final block = parts[i];
-        final aMatch = RegExp(r'''<a[^>]+href=["\']([^"\']+)["\']''').firstMatch(block);
-        final imgMatch = RegExp(r'''<img[^>]+src=["\']([^"\']+)["\']''').firstMatch(block);
+        final aMatch =
+        RegExp(r'''<a[^>]+href=["\']([^"\']+)["\']''').firstMatch(block);
+        final imgMatch =
+        RegExp(r'''<img[^>]+src=["\']([^"\']+)["\']''').firstMatch(block);
         final h3Match = RegExp(r'''<h3[^>]*>([\s\S]*?)<\/h3>''').firstMatch(block);
 
         if (aMatch != null && h3Match != null) {
           String link = aMatch.group(1)!;
-          String title = h3Match.group(1)!.replaceAll(RegExp(r'<[^>]+>'), '').trim();
+          String title =
+          h3Match.group(1)!.replaceAll(RegExp(r'<[^>]+>'), '').trim();
           String thumb = imgMatch != null ? imgMatch.group(1)! : '';
 
           if (!link.startsWith('http')) link = baseUrl + link;
@@ -121,7 +125,7 @@ class HentaiVietsubCore {
       return items;
     } catch (e) {
       print('HentaiVietsub Parse Error: $e');
-      return [];
+      return[];
     }
   }
 
@@ -135,15 +139,18 @@ class HentaiVietsubCore {
       final res = await http.get(Uri.parse(url), headers: baseHeaders);
       if (res.statusCode != 200) return null;
 
-      final videoIdMatch = RegExp(r'videos/([a-fA-F0-9]{24})').firstMatch(res.body);
+      final videoIdMatch =
+      RegExp(r'videos/([a-fA-F0-9]{24})').firstMatch(res.body);
       String? videoId;
 
       if (videoIdMatch != null) {
         videoId = videoIdMatch.group(1);
       } else {
-        final iframeMatch = RegExp(r'''<iframe[^>]+src=["\']([^"\']+)["\']''').firstMatch(res.body);
+        final iframeMatch =
+        RegExp(r'''<iframe[^>]+src=["\']([^"\']+)["\']''').firstMatch(res.body);
         if (iframeMatch != null) {
-          final subMatch = RegExp(r'/([a-fA-F0-9]{24})').firstMatch(iframeMatch.group(1)!);
+          final subMatch =
+          RegExp(r'/([a-fA-F0-9]{24})').firstMatch(iframeMatch.group(1)!);
           if (subMatch != null) videoId = subMatch.group(1);
         }
       }
@@ -203,11 +210,11 @@ static Future<List<AnimeModel>> getTrending({int page = 1}) async {
     'countryOrigin': 'ALL',
   };
   try {
-    final res = await _get(_showQuery, variables);
+    final res = await _post(_showQuery, variables);
     final List edges = res['data']['shows']['edges'];
     return edges.map((e) => AnimeModel.fromJson(e)).toList();
   } catch (e) {
-    return [];
+    return[];
   }
 }
 
@@ -220,11 +227,11 @@ static Future<List<AnimeModel>> search(String query, {int page = 1}) async {
     'countryOrigin': 'ALL',
   };
   try {
-    final res = await _get(_showQuery, variables);
+    final res = await _post(_showQuery, variables);
     final List edges = res['data']['shows']['edges'];
     return edges.map((e) => AnimeModel.fromJson(e)).toList();
   } catch (e) {
-    return [];
+    return[];
   }
 }
 
@@ -235,12 +242,12 @@ static Future<List<String>> getEpisodes(String animeId) async {
 }
 ''';
 try {
-  final res = await _get(gql, {'showId': animeId});
+  final res = await _post(gql, {'showId': animeId});
   final d = res['data']['show']['availableEpisodesDetail'];
-  final List details = d['sub'] ?? d['dub'] ?? d['raw'] ?? [];
+  final List details = d['sub'] ?? d['dub'] ?? d['raw'] ??[];
   return details.reversed.map((e) => e.toString()).toList();
 } catch (e) {
-  return [];
+  return[];
 }
 }
 
@@ -253,7 +260,7 @@ static Future<String?> getStreamUrl(String animeId, String episodeNum) async {
 }
 ''';
 try {
-  final res = await _get(gql, {
+  final res = await _post(gql, {
     'showId': animeId,
     'translationType': 'sub',
     'episodeString': episodeNum,
@@ -272,10 +279,22 @@ try {
 return null;
 }
 
-static Future<Map<String, dynamic>> _get(
+// Changed to use POST with JSON body to bypass Cloudflare block
+static Future<Map<String, dynamic>> _post(
   String query, Map<String, dynamic> vars) async {
-    final uri = Uri.parse('$baseUrl?variables=${jsonEncode(vars)}&query=$query');
-    final res = await http.get(uri, headers: {'User-Agent': agent, 'Referer': referer});
+    final uri = Uri.parse(baseUrl);
+    final res = await http.post(
+      uri,
+      headers: {
+        'User-Agent': agent,
+        'Referer': referer,
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({
+        'variables': vars,
+        'query': query,
+      }),
+    );
     if (res.statusCode == 200) return jsonDecode(res.body);
     throw Exception('AniCore API Error ${res.statusCode}');
   }
@@ -336,12 +355,12 @@ class ViAnimeCore {
       final res = await http
       .get(Uri.parse('$baseUrl/phim/$slug'), headers: _headers)
       .timeout(const Duration(seconds: 15));
-      if (res.statusCode != 200) return [];
+      if (res.statusCode != 200) return[];
       final sd = _serverData(jsonDecode(res.body));
-      if (sd == null) return [];
+      if (sd == null) return[];
       return List.generate(sd.length, (i) => '${i + 1}');
     } catch (e) {
-      return [];
+      return[];
     }
   }
 
@@ -385,7 +404,7 @@ class ViAnimeCore {
       );
       }).toList();
     } catch (e) {
-      return [];
+      return[];
     }
   }
 
