@@ -28,8 +28,8 @@ import 'package:url_launcher/url_launcher.dart';
  * Global Definitions & App State
  * Defines theme colors and main entry points.
  */
-const String kAppVersion = "1.8.4";
-const String kBuildNumber = "184";
+const String kAppVersion = "1.8.6";
+const String kBuildNumber = "186";
 const kColorCream = Color(0xFFFEEAC9);
 const kColorPeach = Color(0xFFFFCDC9);
 const kColorSoftPink = Color(0xFFFDACAC);
@@ -270,46 +270,116 @@ class UpdaterService {
       }
     } catch (_) {}
   }
+
   static void _showDialog(BuildContext context, String ver, String notes, List assets) {
-    showGeneralDialog(context: context, barrierDismissible: true, barrierLabel: "Dismiss", barrierColor: Colors.black.withOpacity(0.6), transitionDuration: const Duration(milliseconds: 400),
-    transitionBuilder: (ctx, a1, a2, child) => Transform.scale(scale: Curves.easeOutBack.transform(a1.value), child: Opacity(opacity: a1.value, child: child)),
-    pageBuilder: (ctx, a1, a2) => Center(child: Material(color: Colors.transparent, child: Container(
-      width: MediaQuery.of(context).size.width * 0.85, constraints: const BoxConstraints(maxWidth: 500, maxHeight: 600), padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(25), boxShadow:[BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 40, offset: const Offset(0, 20), spreadRadius: 5)]),
-      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children:[
-        Row(children:[
-          Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: kColorCoral.withOpacity(0.1), shape: BoxShape.circle), child: const Icon(LucideIcons.sparkles, color: kColorCoral, size: 24)),
-          const SizedBox(width: 15),
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children:[Text("New Version Available", style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.bold, color: kColorDarkText)), Text(ver, style: GoogleFonts.inter(fontSize: 14, color: kColorCoral, fontWeight: FontWeight.bold))])),
-        ]).animate().slideY(begin: -0.2, end: 0, duration: 400.ms).fadeIn(),
-        const SizedBox(height: 20), Divider(color: Colors.grey.withOpacity(0.2)), const SizedBox(height: 10),
-        Flexible(child: SingleChildScrollView(physics: const BouncingScrollPhysics(), child: MarkdownBody(data: notes, styleSheet: MarkdownStyleSheet(p: GoogleFonts.inter(color: kColorDarkText, fontSize: 14), h1: GoogleFonts.inter(color: kColorDarkText, fontWeight: FontWeight.bold, fontSize: 20), h2: GoogleFonts.inter(color: kColorDarkText, fontWeight: FontWeight.bold, fontSize: 18), h3: GoogleFonts.inter(color: kColorDarkText, fontWeight: FontWeight.bold, fontSize: 16), listBullet: GoogleFonts.inter(color: kColorCoral), strong: GoogleFonts.inter(fontWeight: FontWeight.bold, color: kColorCoral), code: GoogleFonts.jetBrainsMono(backgroundColor: Colors.grey.shade100, color: kColorDarkText))))).animate(delay: 200.ms).fadeIn().slideX(begin: 0.1, end: 0),
-        const SizedBox(height: 20),
-        Row(mainAxisAlignment: MainAxisAlignment.end, children:[
-          TextButton(onPressed: () => Navigator.pop(ctx), child: Text("Later", style: GoogleFonts.inter(color: Colors.black54, fontWeight: FontWeight.w600))), const SizedBox(width: 10),
-          ElevatedButton.icon(style: ElevatedButton.styleFrom(backgroundColor: kColorCoral, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)), padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12), elevation: 0), onPressed: () { Navigator.pop(ctx); _performUpdate(context, assets, ver); }, icon: const Icon(LucideIcons.downloadCloud, size: 18), label: Text("Update Now", style: GoogleFonts.inter(fontWeight: FontWeight.bold))),
-        ]).animate(delay: 400.ms).fadeIn().slideY(begin: 0.2, end: 0),
-      ])))));
+    showGeneralDialog(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: "Dismiss",
+      barrierColor: Colors.black.withOpacity(0.6),
+      transitionDuration: const Duration(milliseconds: 400),
+      // FIX: clamp scale to [0,1] — easeOutBack undershoots below 0 on
+      // dismiss which makes Flutter render an inverted/black frame.
+      transitionBuilder: (ctx, a1, a2, child) => Transform.scale(
+        scale: Curves.easeOutBack.transform(a1.value).clamp(0.0, 1.0),
+        child: Opacity(
+          opacity: a1.value.clamp(0.0, 1.0),
+          child: child,
+        ),
+      ),
+      pageBuilder: (ctx, a1, a2) => Center(child: Material(color: Colors.transparent, child: Container(
+        width: MediaQuery.of(context).size.width * 0.85, constraints: const BoxConstraints(maxWidth: 500, maxHeight: 600), padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(25), boxShadow:[BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 40, offset: const Offset(0, 20), spreadRadius: 5)]),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children:[
+          Row(children:[
+            Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: kColorCoral.withOpacity(0.1), shape: BoxShape.circle), child: const Icon(LucideIcons.sparkles, color: kColorCoral, size: 24)),
+            const SizedBox(width: 15),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children:[Text("New Version Available", style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.bold, color: kColorDarkText)), Text(ver, style: GoogleFonts.inter(fontSize: 14, color: kColorCoral, fontWeight: FontWeight.bold))])),
+          ]).animate().slideY(begin: -0.2, end: 0, duration: 400.ms).fadeIn(),
+          const SizedBox(height: 20), Divider(color: Colors.grey.withOpacity(0.2)), const SizedBox(height: 10),
+          Flexible(child: SingleChildScrollView(physics: const BouncingScrollPhysics(), child: MarkdownBody(data: notes, styleSheet: MarkdownStyleSheet(p: GoogleFonts.inter(color: kColorDarkText, fontSize: 14), h1: GoogleFonts.inter(color: kColorDarkText, fontWeight: FontWeight.bold, fontSize: 20), h2: GoogleFonts.inter(color: kColorDarkText, fontWeight: FontWeight.bold, fontSize: 18), h3: GoogleFonts.inter(color: kColorDarkText, fontWeight: FontWeight.bold, fontSize: 16), listBullet: GoogleFonts.inter(color: kColorCoral), strong: GoogleFonts.inter(fontWeight: FontWeight.bold, color: kColorCoral), code: GoogleFonts.jetBrainsMono(backgroundColor: Colors.grey.shade100, color: kColorDarkText))))).animate(delay: 200.ms).fadeIn().slideX(begin: 0.1, end: 0),
+          const SizedBox(height: 20),
+          Row(mainAxisAlignment: MainAxisAlignment.end, children:[
+            TextButton(onPressed: () => Navigator.pop(ctx), child: Text("Later", style: GoogleFonts.inter(color: Colors.black54, fontWeight: FontWeight.w600))), const SizedBox(width: 10),
+            ElevatedButton.icon(style: ElevatedButton.styleFrom(backgroundColor: kColorCoral, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)), padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12), elevation: 0), onPressed: () { Navigator.pop(ctx); _performUpdate(context, assets, ver); }, icon: const Icon(LucideIcons.downloadCloud, size: 18), label: Text("Update Now", style: GoogleFonts.inter(fontWeight: FontWeight.bold))),
+          ]).animate(delay: 400.ms).fadeIn().slideY(begin: 0.2, end: 0),
+        ])))));
   }
+
   static Future<void> _performUpdate(BuildContext context, List assets, String ver) async {
     String? url, fn;
+
     if (Platform.isAndroid) {
-      if (!(await Permission.storage.request().isGranted)) return;
-      if (!(await Permission.requestInstallPackages.request().isGranted)) { if(context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Cannot install without permission."))); return; }
-      url = assets.firstWhere((a) => a['name'].toString().endsWith('.apk'), orElse: () => null)?['browser_download_url']; fn = "AniCli_$ver.apk";
+      // FIX: Permission.storage is deprecated on Android 13+ (API 33).
+      // On Android 13+ it returns PermissionStatus.denied immediately,
+      // causing the entire OTA flow to silently abort before downloading.
+      // Only REQUEST_INSTALL_PACKAGES is needed for APK side-loading.
+      final installStatus = await Permission.requestInstallPackages.status;
+      if (!installStatus.isGranted) {
+        final result = await Permission.requestInstallPackages.request();
+        if (!result.isGranted) {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: const Text("Allow 'Install unknown apps' in Settings to update."),
+                backgroundColor: kColorCoral,
+                duration: const Duration(seconds: 5),
+                action: SnackBarAction(
+                  label: "Settings",
+                  textColor: Colors.white,
+                  onPressed: () => openAppSettings(),
+                ),
+              ),
+            );
+          }
+          return;
+        }
+      }
+      url = assets.firstWhere((a) => a['name'].toString().endsWith('.apk'), orElse: () => null)?['browser_download_url'];
+      fn = "AniCli_$ver.apk";
     } else if (Platform.isWindows) {
-      url = assets.firstWhere((a) => a['name'].toString().endsWith('.zip') || a['name'].toString().endsWith('.exe'), orElse: () => null)?['browser_download_url']; fn = "AniCli_$ver.zip";
+      url = assets.firstWhere((a) => a['name'].toString().endsWith('.zip') || a['name'].toString().endsWith('.exe'), orElse: () => null)?['browser_download_url'];
+      fn = "AniCli_$ver.zip";
     } else if (Platform.isLinux) {
-      url = assets.firstWhere((a) => a['name'].toString().endsWith('.tar.gz') || a['name'].toString().endsWith('.AppImage'), orElse: () => null)?['browser_download_url']; fn = "AniCli_$ver.tar.gz";
-    } else { launchUrl(Uri.parse("https://github.com/minhmc2007/AniCli-Flutter/releases/latest"), mode: LaunchMode.externalApplication); return; }
+      url = assets.firstWhere((a) => a['name'].toString().endsWith('.tar.gz') || a['name'].toString().endsWith('.AppImage'), orElse: () => null)?['browser_download_url'];
+      fn = "AniCli_$ver.tar.gz";
+    } else {
+      launchUrl(Uri.parse("https://github.com/minhmc2007/AniCli-Flutter/releases/latest"), mode: LaunchMode.externalApplication);
+      return;
+    }
 
-      if (url == null) { if(context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("No compatible asset found."))); return; }
-      if (!context.mounted) return;
+    if (url == null) { if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("No compatible asset found."))); return; }
+    if (!context.mounted) return;
 
-      final file = await showDialog<File?>(context: context, barrierDismissible: false, builder: (ctx) => GenericDownloadDialog(url: url!, fileName: fn!, title: "Updating App", icon: LucideIcons.download, isUpdate: true));
+    final file = await showDialog<File?>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => GenericDownloadDialog(url: url!, fileName: fn!, title: "Updating App", icon: LucideIcons.download, isUpdate: true),
+    );
+
     if (file != null && context.mounted) {
-      if (Platform.isAndroid) { final res = await OpenFile.open(file.path, type: "application/vnd.android.package-archive"); if (res.type != ResultType.done) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Install Error: ${res.message}"))); }
-      else if (Platform.isWindows || Platform.isLinux) { await launchUrl(Uri.directory(file.parent.path)); ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Downloaded. Please extract manually."), duration: Duration(seconds: 5))); }
+      if (Platform.isAndroid) {
+        // Verify file wasn't deleted by Knox / Play Protect
+        if (!await file.exists()) {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text("APK was removed by Play Protect. Disable it temporarily and try again."),
+                backgroundColor: kColorCoral,
+                duration: Duration(seconds: 6),
+              ),
+            );
+          }
+          return;
+        }
+        final res = await OpenFile.open(file.path, type: "application/vnd.android.package-archive");
+        if (res.type != ResultType.done && context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Install Error: ${res.message}"), backgroundColor: kColorCoral));
+        }
+      } else if (Platform.isWindows || Platform.isLinux) {
+        await launchUrl(Uri.directory(file.parent.path));
+        if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Downloaded. Please extract manually."), duration: Duration(seconds: 5)));
+      }
     }
   }
 }
@@ -326,7 +396,12 @@ class _GenericDownloadDialogState extends State<GenericDownloadDialog> {
 
   Future<void> _start() async {
     try {
-      Directory? dir = widget.isUpdate ? (Platform.isAndroid ? await getExternalStorageDirectory() : await getApplicationDocumentsDirectory()) : ((Platform.isWindows || Platform.isLinux || Platform.isMacOS) ? await getDownloadsDirectory() : await getApplicationDocumentsDirectory());
+      // Use app-specific external dir — less likely to be scanned by Knox/Play Protect
+      // than Downloads folder. Works on all Android versions without storage permission.
+      Directory? dir = widget.isUpdate
+          ? (Platform.isAndroid ? await getExternalStorageDirectory() : await getApplicationDocumentsDirectory())
+          : ((Platform.isWindows || Platform.isLinux || Platform.isMacOS) ? await getDownloadsDirectory() : await getApplicationDocumentsDirectory());
+
       final file = File("${dir!.path}/${widget.fileName}");
       final req = http.Request('GET', Uri.parse(widget.url));
       if (widget.referer.isNotEmpty) req.headers['Referer'] = widget.referer;
