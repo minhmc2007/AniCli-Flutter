@@ -24,12 +24,9 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-/*
- * Global Definitions & App State
- * Defines theme colors and main entry points.
- */
-const String kAppVersion = "1.8.6";
-const String kBuildNumber = "186";
+// Global Definitions & App State
+const String kAppVersion = "1.8.7";
+const String kBuildNumber = "187";
 const kColorCream = Color(0xFFFEEAC9);
 const kColorPeach = Color(0xFFFFCDC9);
 const kColorSoftPink = Color(0xFFFDACAC);
@@ -39,8 +36,9 @@ const kColorDarkText = Color(0xFF4A2B2B);
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
+  await UpdaterService.cleanupOldUpdates(); // Delete stale Android APKs
+  
   final prefs = await SharedPreferences.getInstance();
-
   runApp(MultiProvider(providers:[
     ChangeNotifierProvider(create: (_) => UserProvider()),
     ChangeNotifierProvider(create: (_) => SettingsProvider()),
@@ -78,10 +76,7 @@ class AniCliApp extends StatelessWidget {
   }
 }
 
-/*
- * Providers
- * Manages reactive states for settings, sources, and read/watch history.
- */
+// Providers
 class SourceProvider extends ChangeNotifier {
   AnimeSource _source = AnimeSource.en;
   AnimeSource get source => _source;
@@ -194,10 +189,7 @@ class ProgressProvider extends ChangeNotifier {
   int getProgress(String animeId, String epNum) => _progress["${animeId}_$epNum"] ?? 0;
 }
 
-/*
- * Utilities & UI Extensions
- * Hardware diagnostics, animations, and specialized UI wrappers.
- */
+// Utilities & Extensions
 class MemoryUtils {
   static Future<double> getTotalRamGB() async {
     try {
@@ -234,19 +226,28 @@ extension AnimExt on Widget {
 
 extension LetExt<T> on T { R let<R>(R Function(T) cb) => cb(this); }
 
-/*
- * Updater & Services
- * Handles cross-platform binary updates directly from GitHub releases.
- */
+// Updater & Services
 class UpdaterService {
   static const String _releaseUrl = "https://api.github.com/repos/minhmc2007/AniCli-Flutter/releases/latest";
+  
   static String? _extractSemVer(String raw) => RegExp(r'(\d+)\.(\d+)(\.(\d+))?').firstMatch(raw)?.let((m) => "${m.group(1) ?? '0'}.${m.group(2) ?? '0'}.${m.group(4) ?? '0'}");
+  
   static bool _isNewer(String cur, String rem) {
     try {
       var c = cur.split('.').map(int.parse).toList(), r = rem.split('.').map(int.parse).toList();
       for (int i=0; i<3; i++) { if ((i<r.length?r[i]:0) > (i<c.length?c[i]:0)) return true; if ((i<r.length?r[i]:0) < (i<c.length?c[i]:0)) return false; }
     } catch (_) {} return false;
   }
+
+  static Future<void> cleanupOldUpdates() async {
+    if (!Platform.isAndroid) return;
+    try {
+      final dir = await getExternalStorageDirectory();
+      if (dir == null) return;
+      dir.listSync().whereType<File>().where((f) => f.path.endsWith('.apk')).forEach((f) => f.deleteSync());
+    } catch (_) {}
+  }
+
   static Future<void> checkAndUpdate(BuildContext context) async {
     try {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Checking for updates...")));
@@ -259,6 +260,7 @@ class UpdaterService {
       }
     } catch (e) { if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Update check failed: $e"), backgroundColor: kColorCoral)); }
   }
+
   static Future<void> checkSilent(BuildContext context) async {
     try {
       final res = await http.get(Uri.parse(_releaseUrl));
@@ -273,20 +275,8 @@ class UpdaterService {
 
   static void _showDialog(BuildContext context, String ver, String notes, List assets) {
     showGeneralDialog(
-      context: context,
-      barrierDismissible: true,
-      barrierLabel: "Dismiss",
-      barrierColor: Colors.black.withOpacity(0.6),
-      transitionDuration: const Duration(milliseconds: 400),
-      // FIX: clamp scale to [0,1] — easeOutBack undershoots below 0 on
-      // dismiss which makes Flutter render an inverted/black frame.
-      transitionBuilder: (ctx, a1, a2, child) => Transform.scale(
-        scale: Curves.easeOutBack.transform(a1.value).clamp(0.0, 1.0),
-        child: Opacity(
-          opacity: a1.value.clamp(0.0, 1.0),
-          child: child,
-        ),
-      ),
+      context: context, barrierDismissible: true, barrierLabel: "Dismiss", barrierColor: Colors.black.withOpacity(0.6), transitionDuration: const Duration(milliseconds: 400),
+      transitionBuilder: (ctx, a1, a2, child) => Transform.scale(scale: Curves.easeOutBack.transform(a1.value).clamp(0.0, 1.0), child: Opacity(opacity: a1.value.clamp(0.0, 1.0), child: child)),
       pageBuilder: (ctx, a1, a2) => Center(child: Material(color: Colors.transparent, child: Container(
         width: MediaQuery.of(context).size.width * 0.85, constraints: const BoxConstraints(maxWidth: 500, maxHeight: 600), padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(25), boxShadow:[BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 40, offset: const Offset(0, 20), spreadRadius: 5)]),
@@ -308,77 +298,74 @@ class UpdaterService {
 
   static Future<void> _performUpdate(BuildContext context, List assets, String ver) async {
     String? url, fn;
+    bool runSetup = false;
+    String exe = Platform.resolvedExecutable.toLowerCase();
 
     if (Platform.isAndroid) {
-      // FIX: Permission.storage is deprecated on Android 13+ (API 33).
-      // On Android 13+ it returns PermissionStatus.denied immediately,
-      // causing the entire OTA flow to silently abort before downloading.
-      // Only REQUEST_INSTALL_PACKAGES is needed for APK side-loading.
-      final installStatus = await Permission.requestInstallPackages.status;
-      if (!installStatus.isGranted) {
-        final result = await Permission.requestInstallPackages.request();
-        if (!result.isGranted) {
-          if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: const Text("Allow 'Install unknown apps' in Settings to update."),
-                backgroundColor: kColorCoral,
-                duration: const Duration(seconds: 5),
-                action: SnackBarAction(
-                  label: "Settings",
-                  textColor: Colors.white,
-                  onPressed: () => openAppSettings(),
-                ),
-              ),
-            );
-          }
+      final status = await Permission.requestInstallPackages.status;
+      if (!status.isGranted) {
+        final res = await Permission.requestInstallPackages.request();
+        if (!res.isGranted && context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: const Text("Allow 'Install unknown apps' in Settings to update."), backgroundColor: kColorCoral, action: SnackBarAction(label: "Settings", textColor: Colors.white, onPressed: () => openAppSettings())));
           return;
         }
       }
       url = assets.firstWhere((a) => a['name'].toString().endsWith('.apk'), orElse: () => null)?['browser_download_url'];
-      fn = "AniCli_$ver.apk";
+      fn = "app-release.apk";
+    } else if (Platform.isIOS) {
+      url = assets.firstWhere((a) => a['name'].toString().endsWith('.ipa'), orElse: () => null)?['browser_download_url'];
+      fn = "anicli-unsigned.ipa";
     } else if (Platform.isWindows) {
-      url = assets.firstWhere((a) => a['name'].toString().endsWith('.zip') || a['name'].toString().endsWith('.exe'), orElse: () => null)?['browser_download_url'];
-      fn = "AniCli_$ver.zip";
+      if (exe.contains('program files') || exe.contains('appdata\\local\\programs')) {
+        url = assets.firstWhere((a) => a['name'].toString().endsWith('-setup.exe'), orElse: () => null)?['browser_download_url'];
+        fn = "anicli-windows-setup.exe";
+        runSetup = true;
+      } else {
+        url = assets.firstWhere((a) => a['name'].toString().endsWith('-portable.zip'), orElse: () => null)?['browser_download_url'];
+        fn = "anicli-windows-portable.zip";
+      }
     } else if (Platform.isLinux) {
-      url = assets.firstWhere((a) => a['name'].toString().endsWith('.tar.gz') || a['name'].toString().endsWith('.AppImage'), orElse: () => null)?['browser_download_url'];
-      fn = "AniCli_$ver.tar.gz";
-    } else {
-      launchUrl(Uri.parse("https://github.com/minhmc2007/AniCli-Flutter/releases/latest"), mode: LaunchMode.externalApplication);
+      if (exe.startsWith('/usr/') || exe.startsWith('/opt/')) {
+        if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("App managed by package manager. Please update via system.")));
+        return;
+      }
+      if (exe.endsWith('.appimage')) {
+        url = assets.firstWhere((a) => a['name'].toString().endsWith('.AppImage'), orElse: () => null)?['browser_download_url'];
+        fn = "anicli-linux-x64.AppImage";
+      } else {
+        url = assets.firstWhere((a) => a['name'].toString().endsWith('-portable.tar.gz'), orElse: () => null)?['browser_download_url'];
+        fn = "anicli-linux-portable.tar.gz";
+      }
+    } else if (Platform.isMacOS) {
+      url = assets.firstWhere((a) => a['name'].toString().endsWith('.zip'), orElse: () => null)?['browser_download_url'];
+      fn = "anicli-macos.zip";
+    }
+
+    if (url == null) {
+      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("No compatible asset found.")));
       return;
     }
 
-    if (url == null) { if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("No compatible asset found."))); return; }
     if (!context.mounted) return;
-
     final file = await showDialog<File?>(
-      context: context,
-      barrierDismissible: false,
+      context: context, barrierDismissible: false,
       builder: (ctx) => GenericDownloadDialog(url: url!, fileName: fn!, title: "Updating App", icon: LucideIcons.download, isUpdate: true),
     );
 
     if (file != null && context.mounted) {
       if (Platform.isAndroid) {
-        // Verify file wasn't deleted by Knox / Play Protect
-        if (!await file.exists()) {
-          if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text("APK was removed by Play Protect. Disable it temporarily and try again."),
-                backgroundColor: kColorCoral,
-                duration: Duration(seconds: 6),
-              ),
-            );
-          }
+        if (!await file.exists() && context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("APK removed by Play Protect. Disable temporarily and try again."), backgroundColor: kColorCoral));
           return;
         }
         final res = await OpenFile.open(file.path, type: "application/vnd.android.package-archive");
-        if (res.type != ResultType.done && context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Install Error: ${res.message}"), backgroundColor: kColorCoral));
-        }
-      } else if (Platform.isWindows || Platform.isLinux) {
+        if (res.type != ResultType.done && context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Install Error: ${res.message}"), backgroundColor: kColorCoral));
+      } else if (Platform.isWindows && runSetup) {
+        await Process.start(file.path,[], mode: ProcessStartMode.detached);
+        exit(0);
+      } else {
         await launchUrl(Uri.directory(file.parent.path));
-        if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Downloaded. Please extract manually."), duration: Duration(seconds: 5)));
+        if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Downloaded to Downloads folder."), duration: Duration(seconds: 5)));
       }
     }
   }
@@ -396,17 +383,22 @@ class _GenericDownloadDialogState extends State<GenericDownloadDialog> {
 
   Future<void> _start() async {
     try {
-      // Use app-specific external dir — less likely to be scanned by Knox/Play Protect
-      // than Downloads folder. Works on all Android versions without storage permission.
-      Directory? dir = widget.isUpdate
-          ? (Platform.isAndroid ? await getExternalStorageDirectory() : await getApplicationDocumentsDirectory())
-          : ((Platform.isWindows || Platform.isLinux || Platform.isMacOS) ? await getDownloadsDirectory() : await getApplicationDocumentsDirectory());
+      Directory? dir;
+      if (Platform.isAndroid) {
+        dir = await getExternalStorageDirectory();
+      } else if (Platform.isIOS) {
+        dir = await getApplicationDocumentsDirectory();
+      } else {
+        dir = await getDownloadsDirectory();
+      }
 
       final file = File("${dir!.path}/${widget.fileName}");
       final req = http.Request('GET', Uri.parse(widget.url));
       if (widget.referer.isNotEmpty) req.headers['Referer'] = widget.referer;
+      
       final res = await _client.send(req);
       if (res.statusCode != 200) throw Exception("HTTP ${res.statusCode}");
+      
       final total = res.contentLength ?? 0; int rec = 0; final bytes = <int>[];
       res.stream.listen((b) {
         bytes.addAll(b); rec += b.length;
@@ -430,10 +422,7 @@ class _GenericDownloadDialogState extends State<GenericDownloadDialog> {
   ))).animate().fadeIn().scale(curve: Curves.easeOutBack));
 }
 
-/*
- * Shared Views & Animations
- * Thematic backgrounds and glassmorphic UI elements.
- */
+// Shared Views & Animations
 class LiquidGlassContainer extends StatelessWidget {
   final Widget child; final double blur, opacity; final BorderRadius? borderRadius; final Border? border;
   const LiquidGlassContainer({super.key, required this.child, this.blur=15, this.opacity=0.4, this.borderRadius, this.border});
@@ -516,10 +505,7 @@ class FloatingOrbsBackground extends StatelessWidget {
   }
 }
 
-/*
- * OOBE Setup Screens
- * Shown exclusively on first launch.
- */
+// OOBE Setup Screens
 class OnboardingScreen extends StatefulWidget { const OnboardingScreen({super.key}); @override State<OnboardingScreen> createState() => _OnboardingScreenState(); }
 class _OnboardingScreenState extends State<OnboardingScreen> {
   final List<String> _greetings =["Welcome", "こんにちは", "AniCli"]; int _idx = 0; Timer? _timer; bool _isFinished = false;
@@ -564,10 +550,7 @@ class _SourceOpt extends StatelessWidget {
   ])))));
 }
 
-/*
- * Main Shell UI
- * Top level routing and app bar layout logic.
- */
+// Main Shell UI
 class MainScreen extends StatefulWidget { const MainScreen({super.key}); @override State<MainScreen> createState() => _MainScreenState(); }
 class _MainScreenState extends State<MainScreen> {
   int _idx = 0; final GlobalKey _hKey = GlobalKey(), _fKey = GlobalKey(), _sKey = GlobalKey();
@@ -594,10 +577,7 @@ class _MainScreenState extends State<MainScreen> {
   }
 }
 
-/*
- * Specialized Players
- * Native manga reading components and integrated MPV implementation.
- */
+// Specialized Players
 class MangaReaderScreen extends StatefulWidget {
   final AnimeModel anime; final String chapterNum; final List<String> allChapters;
   const MangaReaderScreen({super.key, required this.anime, required this.chapterNum, required this.allChapters});
@@ -777,10 +757,7 @@ class _CenterPlayButtonState extends State<CenterPlayButton> with TickerProvider
   ])));
 }
 
-/*
- * Navigational Views
- * Browse view, settings, and general core screens.
- */
+// Navigational Views
 class BrowseView extends StatefulWidget { final Function(AnimeModel, String) onAnimeTap; const BrowseView({super.key, required this.onAnimeTap}); @override State<BrowseView> createState() => _BrowseViewState(); }
 class _BrowseViewState extends State<BrowseView> with AutomaticKeepAliveClientMixin {
   final TextEditingController _sCtrl = TextEditingController();
@@ -1083,7 +1060,7 @@ class _SettingsViewState extends State<SettingsView> {
           padding: const EdgeInsets.all(16.0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
+            children:[
               Row(children: const[Icon(LucideIcons.globe, color: kColorCoral), SizedBox(width: 10), Text("Anime Source", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16))]),
               const SizedBox(height: 10),
               DropdownButton<AnimeSource>(
@@ -1174,7 +1151,7 @@ class _SettingsViewState extends State<SettingsView> {
           padding: const EdgeInsets.all(16.0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
+            children:[
               Row(children: const[Icon(LucideIcons.zap, color: kColorCoral), SizedBox(width: 10), Text("Visual Mode", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16))]),
               const SizedBox(height: 10),
               DropdownButton<PerformanceMode>(
@@ -1206,7 +1183,7 @@ class _SettingsViewState extends State<SettingsView> {
             padding: const EdgeInsets.all(16.0),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
+              children:[
                 Row(children: const[Icon(LucideIcons.hardDrive, color: kColorCoral), SizedBox(width: 10), Text("Video Cache", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16))]),
                 const SizedBox(height: 5),
                 Text("Buffer Duration: ${sp.cacheSecs > 300 ? 'Unlimited' : sp.cacheSecs.toInt().toString() + ' seconds'}", style: const TextStyle(color: Colors.black54, fontSize: 13)),
@@ -1288,10 +1265,7 @@ class _SettingsViewState extends State<SettingsView> {
   }
 }
 
-/*
- * Detailed Anime/Manga Display
- * Renders individual pages with chapters and episode lists.
- */
+// Detailed Anime/Manga Display
 class AnimeDetailView extends StatefulWidget { final AnimeModel anime; final String heroTag; const AnimeDetailView({super.key, required this.anime, required this.heroTag}); @override State<AnimeDetailView> createState() => _AnimeDetailViewState(); }
 class _AnimeDetailViewState extends State<AnimeDetailView> {
   List<String> _episodes =[]; bool _isLoading = true, _isDownloadMode = false; String? _loadingStatus;
