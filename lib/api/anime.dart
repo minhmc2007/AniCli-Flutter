@@ -373,6 +373,7 @@ class ViAnimeCore {
       if (res.statusCode != 200) return null;
       final sd = _serverData(jsonDecode(res.body));
       if (sd == null) return null;
+      if (sd.isEmpty) return null;
       return sd[(idx - 1).clamp(0, sd.length - 1)]['link_m3u8'] as String?;
     } catch (e) {
       return null;
