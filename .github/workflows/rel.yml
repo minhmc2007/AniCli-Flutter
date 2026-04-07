@@ -6,7 +6,7 @@ on:
       version:
         description: 'Release Version (e.g. v1.0.1)'
         required: true
-        default: 'v1.0.1'
+        default: 'v1.8.5'
 
 permissions:
   contents: write
@@ -27,13 +27,136 @@ jobs:
       run: flutter pub get
     - name: Build Windows
       run: flutter build windows --release
-    - name: Compress Release
-      run: Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath animeclient-windows.zip
-    - name: Upload Windows Artifact
+
+    - name: Install NSIS
+      run: choco install nsis -y
+    
+    - name: Package - Windows (NSIS installer & Portable)
+      shell: powershell
+      run: |
+        $appName = "AniCli Flutter"
+        $prefix = "anicli"
+        
+        # Extract Version from lib/main.dart
+        $mainDart = Get-Content "lib\main.dart" -Raw
+        if ($mainDart -match 'const\s+String\s+kAppVersion\s*=\s*"([^"]+)"') {
+            $version = $matches[1]
+        } else {
+            Write-Host "Warning: Could not parse version from main.dart. Defaulting to 1.0.0"
+            $version = "1.0.0" 
+        }
+        Write-Host "Detected Version: $version"
+
+        $exeName = (Get-ChildItem "build\windows\x64\runner\Release\*.exe" |
+                    Select-Object -First 1).Name
+        Write-Host "Detected exe: $exeName"
+
+        # 1. Create Portable ZIP
+        Write-Host "Creating Portable Zip..."
+        Compress-Archive -Path "build\windows\x64\runner\Release\*" -DestinationPath "$prefix-windows-portable.zip"
+
+        # Locate or Fetch GPL-3.0 License
+        if (Test-Path "LICENSE") {
+            $licenseFile = "LICENSE"
+        } elseif (Test-Path "LICENSE.txt") {
+            $licenseFile = "LICENSE.txt"
+        } else {
+            Write-Host "No LICENSE file found in repo, downloading GPL-3.0..."
+            Invoke-WebRequest -Uri "https://www.gnu.org/licenses/gpl-3.0.txt" -OutFile "GPL3_LICENSE.txt"
+            $licenseFile = "GPL3_LICENSE.txt"
+        }
+
+        # 2. Create Installer Setup.exe
+        Write-Host "Creating Installer Executable..."
+        $nsi = @"
+        Unicode true
+        !include "MUI2.nsh"
+
+        Name              "$appName $version"
+        OutFile           "$prefix-windows-setup.exe"
+        InstallDir        "`$PROGRAMFILES64\$appName"
+        InstallDirRegKey  HKLM "Software\$appName" "InstallDir"
+        RequestExecutionLevel admin
+        SetCompressor     /SOLID lzma
+
+        !define MUI_ABORTWARNING
+        !define MUI_ICON "windows\runner\resources\app_icon.ico"
+
+        !insertmacro MUI_PAGE_WELCOME
+        !insertmacro MUI_PAGE_LICENSE "$licenseFile"
+        !insertmacro MUI_PAGE_DIRECTORY
+        !insertmacro MUI_PAGE_INSTFILES
+        !define MUI_FINISHPAGE_RUN      "`$INSTDIR\$exeName"
+        !define MUI_FINISHPAGE_RUN_TEXT "Launch $appName"
+        !insertmacro MUI_PAGE_FINISH
+
+        !insertmacro MUI_UNPAGE_CONFIRM
+        !insertmacro MUI_UNPAGE_INSTFILES
+
+        !insertmacro MUI_LANGUAGE "English"
+
+        Section "$appName" SecMain
+          SectionIn RO
+          SetOutPath "`$INSTDIR"
+          File /r "build\windows\x64\runner\Release\*"
+
+          CreateShortcut "`$DESKTOP\$appName.lnk" "`$INSTDIR\$exeName"
+          CreateDirectory "`$SMPROGRAMS\$appName"
+          CreateShortcut  "`$SMPROGRAMS\$appName\$appName.lnk"            "`$INSTDIR\$exeName"
+          CreateShortcut  "`$SMPROGRAMS\$appName\Uninstall $appName.lnk" "`$INSTDIR\Uninstall.exe"
+
+          WriteUninstaller "`$INSTDIR\Uninstall.exe"
+          WriteRegStr   HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\$appName" "DisplayName"     "$appName $version"
+          WriteRegStr   HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\$appName" "UninstallString" "`$INSTDIR\Uninstall.exe"
+          WriteRegStr   HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\$appName" "DisplayIcon"     "`$INSTDIR\$exeName"
+          WriteRegStr   HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\$appName" "Publisher"       "Minhmc2007"
+          WriteRegStr   HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\$appName" "DisplayVersion"  "$version"
+          WriteRegStr   HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\$appName" "Comments"        "The Cozy Anime & Manga Client. A beautiful, animated Flutter Anime Client."
+          WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\$appName" "NoModify"        1
+          WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\$appName" "NoRepair"        1
+        SectionEnd
+
+        Section "Uninstall"
+          Delete "`$DESKTOP\$appName.lnk"
+          Delete "`$SMPROGRAMS\$appName\$appName.lnk"
+          Delete "`$SMPROGRAMS\$appName\Uninstall $appName.lnk"
+          RMDir  "`$SMPROGRAMS\$appName"
+          RMDir /r "`$INSTDIR"
+          DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\$appName"
+          DeleteRegKey HKLM "Software\$appName"
+        SectionEnd
+        "@
+
+        # Check for Flutter's default Windows icon path first
+        $icoPath = "windows\runner\resources\app_icon.ico"
+        if (-not (Test-Path $icoPath)) {
+          Write-Host "No app_icon.ico found - falling back to NSIS default icon"
+          $nsi = $nsi -replace '(?m)^.*!define MUI_ICON.*$\r?\n', ''
+        }
+
+        $nsi | Set-Content -Encoding UTF8 "installer.nsi"
+        
+        $makensis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+        if (-not (Test-Path $makensis)) {
+            $makensis = "makensis.exe"
+        }
+        & $makensis /V3 installer.nsi
+
+        if (-not (Test-Path "$prefix-windows-setup.exe")) {
+          throw "NSIS did not produce the installer exe."
+        }
+
+    - name: Upload Windows Portable
       uses: actions/upload-artifact@v4
       with:
-        name: Windows-Build
-        path: animeclient-windows.zip
+        name: Windows-Portable
+        path: anicli-windows-portable.zip
+
+    - name: Upload Windows Installer
+      uses: actions/upload-artifact@v4
+      with:
+        name: Windows-Installer
+        path: anicli-windows-setup.exe
 
   # --- LINUX BUILD ---
   build-linux:
@@ -51,13 +174,84 @@ jobs:
         run: flutter pub get
       - name: Build Linux
         run: flutter build linux --release
-      - name: Compress Linux Build
-        run: tar -czf animeclient-linux.tar.gz -C build/linux/x64/release/bundle .
-      - name: Upload Linux Artifact
+        
+      - name: Package - Linux (Tarball & AppImage)
+        shell: bash
+        run: |
+          PREFIX="anicli"
+          APP_NAME="AniCli Flutter"
+          BUNDLE="build/linux/x64/release/bundle"
+          APPDIR="${APP_NAME}.AppDir"
+
+          # Extract Version from lib/main.dart
+          VERSION=$(grep -oP 'const String kAppVersion = "\K[^"]+' lib/main.dart || echo "1.0.0")
+          echo "Detected Version: $VERSION"
+
+          # 1. Compress Portable Tarball
+          echo "Compressing Portable Tarball..."
+          tar -czf ${PREFIX}-linux-portable.tar.gz -C ${BUNDLE} .
+
+          # 2. Package AppImage
+          echo "Building AppImage..."
+          BINARY_PATH=$(find "${BUNDLE}" -maxdepth 1 -type f -executable | head -1)
+          BINARY_NAME=$(basename "${BINARY_PATH}")
+          echo "Detected binary: ${BINARY_NAME}"
+
+          mkdir -p "${APPDIR}"
+          cp "${BINARY_PATH}"       "${APPDIR}/"
+          cp -r "${BUNDLE}/lib"     "${APPDIR}/" 2>/dev/null || true
+          cp -r "${BUNDLE}/data"    "${APPDIR}/" 2>/dev/null || true
+
+          cat > "${APPDIR}/AppRun" << 'APPRUN'
+          #!/bin/bash
+          HERE="$(dirname "$(readlink -f "${0}")")"
+          export LD_LIBRARY_PATH="${HERE}/lib:${LD_LIBRARY_PATH}"
+          exec "${HERE}/BINARY_PLACEHOLDER" "$@"
+          APPRUN
+          sed -i "s|BINARY_PLACEHOLDER|${BINARY_NAME}|g" "${APPDIR}/AppRun"
+          chmod +x "${APPDIR}/AppRun"
+
+          cat > "${APPDIR}/${PREFIX}.desktop" << EOF
+          [Desktop Entry]
+          Name=${APP_NAME}
+          Comment=The Cozy Anime & Manga Client. A beautiful, animated Flutter Anime Client.
+          Exec=${BINARY_NAME}
+          Icon=${PREFIX}
+          Type=Application
+          Categories=AudioVideo;
+          EOF
+
+          # Dynamically look for icon, fallback to base64 generic pixel
+          if [ -f "assets/icon.png" ]; then
+            cp "assets/icon.png" "${APPDIR}/${PREFIX}.png"
+          else
+            ICON=$(find assets linux -maxdepth 3 -name "*.png" 2>/dev/null | head -1)
+            if [ -n "${ICON}" ]; then
+              cp "${ICON}" "${APPDIR}/${PREFIX}.png"
+            else
+              echo "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPj/HwADBgEB1gVHGQAAAABJRU5ErkJggg==" \
+                | base64 -d > "${APPDIR}/${PREFIX}.png"
+            fi
+          fi
+
+          wget -q "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage" \
+               -O appimagetool
+          chmod +x appimagetool
+
+          ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 \
+            ./appimagetool "${APPDIR}" "${PREFIX}-linux-x64.AppImage"
+
+      - name: Upload Linux Portable
         uses: actions/upload-artifact@v4
         with:
-          name: Linux-Build
-          path: animeclient-linux.tar.gz
+          name: Linux-Portable
+          path: anicli-linux-portable.tar.gz
+
+      - name: Upload Linux AppImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: Linux-AppImage
+          path: anicli-linux-x64.AppImage
 
   # --- ANDROID BUILD ---
   build-android:
@@ -75,6 +269,7 @@ jobs:
         run: flutter pub get
       - name: Build APK
         run: flutter build apk --release
+
       - name: Upload Android Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -98,12 +293,12 @@ jobs:
       - name: Compress MacOS Build
         run: |
           cd build/macos/Build/Products/Release
-          zip -r ../../../../../animeclient-macos.zip "AniCli Flutter.app"
+          zip -r ../../../../../anicli-macos.zip "AniCli Flutter.app"
       - name: Upload MacOS Artifact
         uses: actions/upload-artifact@v4
         with:
           name: MacOS-Build
-          path: animeclient-macos.zip
+          path: anicli-macos.zip
 
   # --- IOS BUILD (Unsigned) ---
   build-ios:
@@ -121,15 +316,13 @@ jobs:
         run: |
           mkdir Payload
           mv build/ios/iphoneos/Runner.app Payload/
-          zip -r animeclient-unsigned.ipa Payload
+          zip -r anicli-unsigned.ipa Payload
       - name: Upload iOS Artifact
         uses: actions/upload-artifact@v4
         with:
           name: iOS-IPA-Unsigned
-          path: animeclient-unsigned.ipa
+          path: anicli-unsigned.ipa
 
-  # --- CREATE RELEASE JOB ---
-  # --- CREATE RELEASE JOB ---
   # --- CREATE RELEASE JOB ---
   create-release:
     name: Create Release
@@ -141,15 +334,23 @@ jobs:
         with:
           fetch-depth: 0 
 
-      # Download all artifacts
-      - name: Download Windows Artifact
+      # Download ALL individual artifacts
+      - name: Download Windows Portable
         uses: actions/download-artifact@v4
         with:
-          name: Windows-Build
-      - name: Download Linux Artifact
+          name: Windows-Portable
+      - name: Download Windows Installer
         uses: actions/download-artifact@v4
         with:
-          name: Linux-Build
+          name: Windows-Installer
+      - name: Download Linux Portable
+        uses: actions/download-artifact@v4
+        with:
+          name: Linux-Portable
+      - name: Download Linux AppImage
+        uses: actions/download-artifact@v4
+        with:
+          name: Linux-AppImage
       - name: Download Android Artifact
         uses: actions/download-artifact@v4
         with:
@@ -189,11 +390,13 @@ jobs:
           ### 📦 Downloads
           | Platform | File |
           | :--- | :--- |
-          | **Windows** | \`animeclient-windows.zip\` |
-          | **Linux** | \`animeclient-linux.tar.gz\` |
+          | **Windows (Installer)** | \`anicli-windows-setup.exe\` |
+          | **Windows (Portable)** | \`anicli-windows-portable.zip\` |
+          | **Linux (AppImage)** | \`anicli-linux-x64.AppImage\` |
+          | **Linux (Portable)** | \`anicli-linux-portable.tar.gz\` |
           | **Android** | \`app-release.apk\` |
-          | **macOS** | \`animeclient-macos.zip\` |
-          | **iOS** | \`animeclient-unsigned.ipa\` (Unsigned) |
+          | **macOS** | \`anicli-macos.zip\` |
+          | **iOS** | \`anicli-unsigned.ipa\` (Unsigned) |
           EOF
 
       - name: Publish Release
@@ -205,8 +408,10 @@ jobs:
           prerelease: false
           make_latest: true
           files: |
-            animeclient-windows.zip
-            animeclient-linux.tar.gz
+            anicli-windows-setup.exe
+            anicli-windows-portable.zip
+            anicli-linux-x64.AppImage
+            anicli-linux-portable.tar.gz
             app-release.apk
-            animeclient-macos.zip
-            animeclient-unsigned.ipa
+            anicli-macos.zip
+            anicli-unsigned.ipa
