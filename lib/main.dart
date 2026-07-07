@@ -8,6 +8,7 @@ import 'package:animeclient/user_provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:flutter/gestures.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -17,6 +18,7 @@ import 'package:http/http.dart' as http;
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:animeclient/api/providers/hls_proxy.dart';
 import 'package:open_file/open_file.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -63,7 +65,7 @@ class AniCliApp extends StatelessWidget {
         textTheme: GoogleFonts.interTextTheme(ThemeData.light().textTheme).apply(bodyColor: kColorDarkText, displayColor: kColorDarkText),
         useMaterial3: true,
         iconTheme: const IconThemeData(color: kColorDarkText),
-        pageTransitionsTheme: const PageTransitionsTheme(builders: {
+        pageTransitionsTheme: PageTransitionsTheme(builders: {
           TargetPlatform.android: ZoomPageTransitionsBuilder(),
           TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
           TargetPlatform.windows: ZoomPageTransitionsBuilder(),
@@ -77,29 +79,55 @@ class AniCliApp extends StatelessWidget {
 }
 
 // Providers
+enum AnimeSource { en, vi, hentaivietsub }
+
+extension AnimeSourceX on AnimeSource {
+  String get label {
+    if (this == AnimeSource.en) return 'English';
+    if (this == AnimeSource.vi) return 'Tiếng Việt';
+    return 'NSFW (18+)';
+  }
+  String get description {
+    if (this == AnimeSource.en) return 'Senshi · Anipub · Anineko · AllAnime · Animepahe';
+    if (this == AnimeSource.vi) return 'PhimAPI · Vietsub';
+    return 'HentaiVietsub · Vietsub';
+  }
+}
+
 class SourceProvider extends ChangeNotifier {
   AnimeSource _source = AnimeSource.en;
   AnimeSource get source => _source;
   bool get isVi => _source == AnimeSource.vi;
   bool get isNSFW => _source == AnimeSource.hentaivietsub;
+  bool get isProvider => _source == AnimeSource.en;
+  bool _loaded = false;
 
   SourceProvider() { _loadSource(); }
 
   Future<void> _loadSource() async {
+    if (_loaded) return;
     final prefs = await SharedPreferences.getInstance();
+    if (_loaded) return;
     final saved = prefs.getString('anime_source');
+    debugPrint('[DEBUG] SourceProvider._loadSource: saved="$saved"');
+    if (_loaded) return;
     if (saved != null) {
       if (saved == 'vi') _source = AnimeSource.vi;
       else if (saved == 'hentaivietsub') _source = AnimeSource.hentaivietsub;
-      else _source = AnimeSource.en;
-      notifyListeners();
+      else if (saved == 'provider' || saved == 'en') _source = AnimeSource.en;
     }
+    _loaded = true;
+    debugPrint('[DEBUG] SourceProvider._loadSource: _source=$_source');
+    notifyListeners();
   }
 
   Future<void> setSource(AnimeSource s) async {
+    debugPrint('[DEBUG] SourceProvider.setSource($s) called');
     _source = s;
+    _loaded = true;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('anime_source', s.name);
+    debugPrint('[DEBUG] SourceProvider.setSource: saved "${s.name}" to prefs');
     notifyListeners();
   }
 }
@@ -445,6 +473,15 @@ class _CozyHeroImageState extends State<CozyHeroImage> {
   @override void initState() { super.initState(); _displayUrl = widget.imageUrl; }
   @override void didUpdateWidget(covariant CozyHeroImage old) { super.didUpdateWidget(old); if (old.imageUrl != widget.imageUrl) { _displayUrl = widget.imageUrl; _fallbackTried = false; } }
 
+  static const _cdnFallbacks = {'https://img.ophim.live': 'https://phimimg.com', 'https://phimimg.com': 'https://img.ophim.live'};
+  String? _altCdnUrl(String? url) {
+    if (url == null) return null;
+    for (final e in _cdnFallbacks.entries) {
+      if (url.startsWith(e.key)) return url.replaceFirst(e.key, e.value);
+    }
+    return null;
+  }
+
   Map<String, String>? _getHeaders(String url) {
     if (url.contains('youtu-chan') || url.contains('fast4speed')) return AllMangaCore.pageHeaders;
     else if (url.contains('wp.youtube-anime.com') || url.contains('allanime') || url.contains('allmanga')) return AllMangaCore.coverHeaders;
@@ -459,13 +496,20 @@ class _CozyHeroImageState extends State<CozyHeroImage> {
         imageUrl: _displayUrl!, fit: widget.boxFit, httpHeaders: _getHeaders(_displayUrl!),
         placeholder: (_,__) => Container(color: kColorPeach),
         errorWidget: (ctx, url, err) {
-          if (!_fallbackTried && widget.fallbackTitle != null) {
+          if (!_fallbackTried) {
             _fallbackTried = true;
-            Future.delayed(Duration.zero, () async {
-              final fb = await MangaCore.findMangaDexCover(widget.fallbackTitle!);
-              if (fb != null && mounted) setState(() => _displayUrl = fb);
-            });
+            final altCdn = _altCdnUrl(_displayUrl);
+            if (altCdn != null) {
+              Future.microtask(() { if (mounted) setState(() => _displayUrl = altCdn); });
               return Container(color: kColorPeach);
+            }
+            if (widget.fallbackTitle != null) {
+              Future.delayed(Duration.zero, () async {
+                final fb = await MangaCore.findMangaDexCover(widget.fallbackTitle!);
+                if (fb != null && mounted) setState(() => _displayUrl = fb);
+              });
+              return Container(color: kColorPeach);
+            }
           }
           return Container(color: kColorPeach, child: const Center(child: Icon(Icons.broken_image, color: Colors.white54)));
         }
@@ -538,7 +582,8 @@ Future<void> _go(BuildContext context, AnimeSource source) async {
 @override Widget build(BuildContext context) => Scaffold(body: Container(decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors:[Color(0xFFFFF8F0), kColorCream])), child: Stack(fit: StackFit.expand, children:[
   const FloatingOrbsBackground(), SafeArea(child: Center(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 32), child: Column(mainAxisSize: MainAxisSize.min, children:[
     Text("Choose Anime Source", style: GoogleFonts.outfit(fontSize: 32, fontWeight: FontWeight.bold, color: kColorDarkText)), const SizedBox(height: 12), Text("Select your preferred anime content language", style: GoogleFonts.inter(fontSize: 16, color: kColorDarkText.withOpacity(0.7))), const SizedBox(height: 40),
-    _SourceOpt(title: "English", subtitle: "AllAnime · Sub", flag: "🇺🇸", onTap: () => _go(context, AnimeSource.en)), const SizedBox(height: 16), _SourceOpt(title: "Tiếng Việt", subtitle: "PhimAPI · Vietsub", flag: "🇻🇳", onTap: () => _go(context, AnimeSource.vi)),
+    _SourceOpt(title: "English", subtitle: "Multi-Provider · Senshi · Anipub · Anineko · AllAnime · Animepahe", flag: "🇺🇸", onTap: () => _go(context, AnimeSource.en)), const SizedBox(height: 16),
+    _SourceOpt(title: "Tiếng Việt", subtitle: "PhimAPI · Vietsub", flag: "🇻🇳", onTap: () => _go(context, AnimeSource.vi)),
   ])))),
 ])));
 }
@@ -653,9 +698,12 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
   }
 }
 
+const String _kPlayerUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
 class InternalPlayerScreen extends StatefulWidget {
   final String streamUrl, title, animeId, epNum, referer;
-  const InternalPlayerScreen({super.key, required this.streamUrl, required this.title, required this.animeId, required this.epNum, this.referer=''});
+  final Map<String, String>? extraHeaders;
+  const InternalPlayerScreen({super.key, required this.streamUrl, required this.title, required this.animeId, required this.epNum, this.referer='', this.extraHeaders});
   @override State<InternalPlayerScreen> createState() => _InternalPlayerScreenState();
 }
 class _InternalPlayerScreenState extends State<InternalPlayerScreen> {
@@ -679,7 +727,29 @@ class _InternalPlayerScreenState extends State<InternalPlayerScreen> {
     } catch (_) {}
 
     _durSub = _p.stream.duration.listen((d) { if (!_resumeChecked && d.inSeconds > 0) { _resumeChecked = true; _checkResume(); } });
-    _p.open(Media(widget.streamUrl, httpHeaders: {'Referer': widget.referer.isNotEmpty ? widget.referer : AniCore.referer}));
+    final headers = <String, String>{};
+    final ref = widget.referer.isNotEmpty ? widget.referer : AniCore.referer;
+    if (ref.isNotEmpty) headers['Referer'] = ref;
+    if (widget.extraHeaders != null) {
+      headers.addAll(widget.extraHeaders!);
+    } else {
+      headers['User-Agent'] = _kPlayerUA;
+    }
+    debugPrint('[DEBUG] InternalPlayer opening: ${widget.streamUrl}');
+    debugPrint('[DEBUG] InternalPlayer headers: $headers');
+    try {
+      final headerStr = headers.entries.map((e) => '${e.key}: ${e.value}').join(', ');
+      debugPrint('[DEBUG] mpv http-header-fields: $headerStr');
+      (_p.platform as dynamic).setProperty('http-header-fields', headerStr);
+    } catch (e) {
+      debugPrint('[DEBUG] Failed to set http-header-fields: $e');
+    }
+    _p.stream.error.listen((e) { debugPrint('[DEBUG] mpv error: $e'); if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Playback error: $e'))); });
+    _p.stream.completed.listen((_) => debugPrint('[DEBUG] mpv completed'));
+    _p.stream.log.listen((l) { if (l.level == 'error' || l.level == 'warn' || l.level == 'info') debugPrint('[DEBUG] mpv ${l.level}: ${l.text}'); });
+    _p.stream.buffering.listen((b) { if (b) debugPrint('[DEBUG] mpv buffering...'); else debugPrint('[DEBUG] mpv done buffering'); });
+    _p.stream.position.listen((p) { if (p.inSeconds % 10 == 0) debugPrint('[DEBUG] mpv position: $p'); }, onError: (e) => debugPrint('[DEBUG] mpv position error: $e'));
+    _p.open(Media(widget.streamUrl));
     _progT = Timer.periodic(const Duration(seconds: 5), (_) { if (mounted && _p.state.position.inSeconds > 10) context.read<ProgressProvider>().saveProgress(widget.animeId, widget.epNum, _p.state.position.inSeconds); });
     _p.play(); _p.setVolume(100); _startHide();
   }
@@ -778,11 +848,14 @@ class _BrowseViewState extends State<BrowseView> with AutomaticKeepAliveClientMi
 
   void _loadData() async {
     setState(() => _isLoading = true);
-    final src = context.read<SourceProvider>().source;
+    final sp = context.read<SourceProvider>();
+    final src = sp.source;
     final mangaSrc = context.read<MangaSourceProvider>().source;
 
+    final useProvider = src == AnimeSource.en;
     final useVi = src == AnimeSource.vi;
     final isNSFW = src == AnimeSource.hentaivietsub;
+    debugPrint('[DEBUG] _loadData src=$src useProvider=$useProvider useVi=$useVi isNSFW=$isNSFW _query="$_query" _page=$_page _isMangaMode=$_isMangaMode');
 
     List<AnimeModel> res =[];
     if (_isMangaMode) {
@@ -794,6 +867,12 @@ class _BrowseViewState extends State<BrowseView> with AutomaticKeepAliveClientMi
         if (mangaSrc == MangaSource.zettruyen) res = await ZetTruyenCore.search(_query);
         else if (mangaSrc == MangaSource.allanime) res = await AllMangaCore.search(_query);
         else res = await MangaCore.search(_query);
+      }
+    } else if (useProvider) {
+      try {
+        res = await ProviderCoordinator.searchAsAnimeModel(_query, 'sub');
+      } catch (e) {
+        debugPrint('Provider search error: $e');
       }
     } else {
       res = _query.isEmpty
@@ -1069,7 +1148,7 @@ class _SettingsViewState extends State<SettingsView> {
                 dropdownColor: kColorCream,
                 underline: Container(height: 1, color: kColorCoral),
                 items: const[
-                  DropdownMenuItem(value: AnimeSource.en, child: Text("English (AllAnime · Sub)")),
+                  DropdownMenuItem(value: AnimeSource.en, child: Text("English (Multi-Provider)")),
                   DropdownMenuItem(value: AnimeSource.vi, child: Text("Tiếng Việt (PhimAPI · Vietsub)")),
                   DropdownMenuItem(value: AnimeSource.hentaivietsub, child: Text("NSFW 18+ (HentaiVietsub)", style: TextStyle(color: kColorCoral, fontWeight: FontWeight.bold))),
                 ],
@@ -1276,12 +1355,19 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
     final src = widget.anime.sourceId;
     final useVi = src == 'vi';
     final isNSFW = src == 'hentaivietsub';
+    final isProvider = src.contains('::');
 
     List<dynamic> items =[];
     if (widget.anime.isManga) {
       if (src == 'zettruyen') items = await ZetTruyenCore.getChapters(widget.anime.id);
       else if (src == 'allanime') items = await AllMangaCore.getChapters(widget.anime.id);
       else items = await MangaCore.getChapters(widget.anime.id);
+    } else if (isProvider) {
+      try {
+        items = await ProviderCoordinator.episodesList(src, 'sub');
+      } catch (e) {
+        debugPrint('Provider episodes error: $e');
+      }
     } else {
       items = useVi ? await ViAnimeCore.getEpisodes(widget.anime.id) : (isNSFW ? await HentaiVietsubCore.getEpisodes(widget.anime.id) : await AniCore.getEpisodes(widget.anime.id));
     }
@@ -1294,9 +1380,10 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
       context.read<UserProvider>().addToHistory(widget.anime, idNum);
       Navigator.push(context, MaterialPageRoute(builder: (ctx) => MangaReaderScreen(anime: widget.anime, chapterNum: idNum, allChapters: _episodes))); return;
     }
-    final useVi = widget.anime.sourceId == 'vi';
-    final isNSFW = widget.anime.sourceId == 'hentaivietsub';
-    final referer = useVi ? ViAnimeCore.referer : (isNSFW ? HentaiVietsubCore.referer : AniCore.referer);
+    final isProvider = widget.anime.sourceId.contains('::');
+    final useVi = !isProvider && widget.anime.sourceId == 'vi';
+    final isNSFW = !isProvider && widget.anime.sourceId == 'hentaivietsub';
+    final referer = isProvider ? '' : (useVi ? ViAnimeCore.referer : (isNSFW ? HentaiVietsubCore.referer : AniCore.referer));
 
     String displayEpNum = idNum;
 
@@ -1304,7 +1391,9 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
       if (Platform.isAndroid || Platform.isIOS) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Download unavailable on mobile yet."))); return; }
       setState(() => _loadingStatus = "Preparing Download...");
 
-      final url = useVi ? await ViAnimeCore.getStreamUrl(widget.anime.id, idNum) : (isNSFW ? await HentaiVietsubCore.getStreamUrl(widget.anime.id, idNum) : await AniCore.getStreamUrl(widget.anime.id, idNum));
+      final url = isProvider
+        ? await ProviderCoordinator.getStreamUrl(widget.anime.sourceId, idNum, 'sub')
+        : (useVi ? await ViAnimeCore.getStreamUrl(widget.anime.id, idNum) : (isNSFW ? await HentaiVietsubCore.getStreamUrl(widget.anime.id, idNum) : await AniCore.getStreamUrl(widget.anime.id, idNum)));
 
       setState(() => _loadingStatus = null);
       if (url != null) {
@@ -1313,24 +1402,89 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
     } else {
       setState(() => _loadingStatus = "Fetching Stream..."); context.read<UserProvider>().addToHistory(widget.anime, displayEpNum);
 
-      final url = useVi ? await ViAnimeCore.getStreamUrl(widget.anime.id, idNum) : (isNSFW ? await HentaiVietsubCore.getStreamUrl(widget.anime.id, idNum) : await AniCore.getStreamUrl(widget.anime.id, idNum));
+      String? url;
+      String resolvedReferer = referer;
+      Map<String, String>? streamExtraHeaders;
+      if (isProvider) {
+        try {
+          debugPrint('[DEBUG] Fetching streams for sourceId=${widget.anime.sourceId}, ep=$idNum');
+          final hints = await ProviderCoordinator.getStreamsWithHints(widget.anime.sourceId, int.tryParse(idNum) ?? 1, 'sub');
+          debugPrint('[DEBUG] hints count=${hints.length}');
+          url = hints.keys.isNotEmpty ? hints.keys.first : null;
+          debugPrint('[DEBUG] streamUrl=$url');
+          final firstHint = hints.values.isNotEmpty ? hints.values.first : null;
+          if (firstHint?.referrer != null) resolvedReferer = firstHint!.referrer!;
+          if (firstHint?.extraHeaders != null) streamExtraHeaders = firstHint!.extraHeaders!;
+          debugPrint('[DEBUG] resolvedReferer=$resolvedReferer');
+          debugPrint('[DEBUG] streamExtraHeaders=$streamExtraHeaders');
+          if (url != null && streamExtraHeaders != null) {
+            if (resolvedReferer.isNotEmpty && !streamExtraHeaders!.containsKey('Referer')) {
+              streamExtraHeaders!['Referer'] = resolvedReferer;
+            }
+            debugPrint('[DEBUG] proxyHeaders=$streamExtraHeaders');
+            await HlsProxy.setHeaders(streamExtraHeaders!);
+            final proxied = HlsProxy.proxyUrl(url!);
+            debugPrint('[DEBUG] proxiedUrl=$proxied');
+            url = proxied;
+            streamExtraHeaders = null;
+            resolvedReferer = '';
+          }
+        } catch (e) {
+          debugPrint('Provider stream error: $e');
+        }
+      } else {
+        url = useVi ? await ViAnimeCore.getStreamUrl(widget.anime.id, idNum) : (isNSFW ? await HentaiVietsubCore.getStreamUrl(widget.anime.id, idNum) : await AniCore.getStreamUrl(widget.anime.id, idNum));
+        if (url != null && useVi) {
+          final viaHeaders = <String, String>{
+            'Referer': resolvedReferer,
+            'User-Agent': _kPlayerUA,
+            if (resolvedReferer.isNotEmpty) 'Origin': resolvedReferer.replaceAll(RegExp(r'/+$'), ''),
+          };
+          debugPrint('[DEBUG] proxyHeaders=$viaHeaders');
+          await HlsProxy.setHeaders(viaHeaders);
+          final proxied = HlsProxy.proxyUrl(url!);
+          debugPrint('[DEBUG] proxiedUrl=$proxied');
+          url = proxied;
+          streamExtraHeaders = null;
+          resolvedReferer = '';
+        }
+      }
 
       setState(() => _loadingStatus = null);
-      if (url != null) {
-        void openInternal() => Navigator.of(context).push(PageRouteBuilder(pageBuilder: (_, a, __) => InternalPlayerScreen(streamUrl: url, title: "${widget.anime.name} - Ep $displayEpNum", animeId: widget.anime.id, epNum: displayEpNum, referer: referer), transitionsBuilder: (_, a, __, c) => FadeTransition(opacity: a, child: c)));
+      if (url is String) {
+        final streamUrl = url;
+        final streamReferer = resolvedReferer;
+        void openInternal() => Navigator.of(context).push(PageRouteBuilder(pageBuilder: (_, a, __) => InternalPlayerScreen(streamUrl: streamUrl, title: "${widget.anime.name} - Ep $displayEpNum", animeId: widget.anime.id, epNum: displayEpNum, referer: streamReferer, extraHeaders: streamExtraHeaders), transitionsBuilder: (_, a, __, c) => FadeTransition(opacity: a, child: c)));
         if ((Platform.isLinux || Platform.isWindows || Platform.isMacOS) && !context.read<SettingsProvider>().useInternalPlayer) {
           final saved = context.read<ProgressProvider>().getProgress(widget.anime.id, displayEpNum); bool resume = false;
           if (saved > 10) resume = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(backgroundColor: kColorCream, title: const Text("Resume?", style: TextStyle(color: kColorCoral, fontWeight: FontWeight.bold)), content: Text("Continue from ${Duration(seconds: saved).toString().split('.').first}?"), actions:[TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Start Over", style: TextStyle(color: Colors.black54))), ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: kColorCoral, foregroundColor: Colors.white), onPressed: () => Navigator.pop(ctx, true), child: const Text("Resume"))])) ?? false;
 
           final cacheSecs = context.read<SettingsProvider>().cacheSecs;
-          final List<String> args =[url, '--http-header-fields=Referer: $referer', '--force-media-title=${widget.anime.name} - Ep $displayEpNum', '--save-position-on-quit'];
+          final headerFields = StringBuffer('Referer: $streamReferer');
+          if (streamExtraHeaders != null) {
+            for (final e in streamExtraHeaders.entries) {
+              headerFields.write(', ${e.key}: ${e.value}');
+            }
+          }
+          final List<String> args =[streamUrl, '--http-header-fields=$headerFields', '--user-agent=$_kPlayerUA', '--force-media-title=${widget.anime.name} - Ep $displayEpNum', '--save-position-on-quit'];
           if (resume) args.add('--start=$saved');
           if (cacheSecs > 300) {
             args.addAll(['--cache=yes', '--demuxer-max-bytes=2000M', '--demuxer-readahead-secs=99999']);
           } else {
             args.add('--demuxer-readahead-secs=${cacheSecs.toInt()}');
           }
-          try { await Process.start('mpv', args, mode: ProcessStartMode.detached); } catch (e) { if (mounted) openInternal(); }
+          final env = Platform.environment;
+          final home = env['USERPROFILE'] ?? env['HOME'] ?? '';
+          final scoopMpv = '$home\\scoop\\apps\\mpv\\current\\mpv.exe';
+          try {
+            await Process.start('mpv', args, mode: ProcessStartMode.detached);
+          } catch (_) {
+            try {
+              await Process.start(scoopMpv, args, mode: ProcessStartMode.detached);
+            } catch (_) {
+              if (mounted) openInternal();
+            }
+          }
         } else openInternal();
       } else { if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Stream not found"))); }
     }

@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -8,6 +7,12 @@ import 'package:crypto/crypto.dart';
 import 'package:encrypt/encrypt.dart' as encrypt;
 
 import 'manga.dart' show AnimeModel;
+import 'providers/provider_base.dart';
+import 'providers/senshi_provider.dart';
+import 'providers/anipub_provider.dart';
+import 'providers/anineko_provider.dart';
+import 'providers/allanime_provider.dart';
+import 'providers/animepahe_provider.dart';
 
 // ════════════════════════════════════════════════════════════════════════════
 // ANIME SOURCE ENUM + PROVIDER
@@ -69,7 +74,7 @@ class SourceProvider extends ChangeNotifier {
 class HentaiVietsubCore {
   static const String baseUrl = 'https://hentaivietsub.com';
   static const String searchUrl = 'https://hentaivietsub.com/tim-kiem';
-  static const String referer = 'https://p1.spexliu.top/';
+  static const String referer = 'https://hentaivietsub.com/';
   static const String userAgent =
       'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36';
 
@@ -142,40 +147,59 @@ class HentaiVietsubCore {
       final res = await http.get(Uri.parse(url), headers: baseHeaders);
       if (res.statusCode != 200) return null;
 
-      final videoIdMatch =
-          RegExp(r'videos/([a-fA-F0-9]{24})').firstMatch(res.body);
       String? videoId;
+      final srcMatches =
+          RegExp(r'''data-source=["']([^"']*videos/([a-fA-F0-9]{24}))["']''')
+              .allMatches(res.body);
+      for (final m in srcMatches) {
+        videoId = m.group(2);
+        if (videoId != null) break;
+      }
 
-      if (videoIdMatch != null) {
-        videoId = videoIdMatch.group(1);
-      } else {
-        final iframeMatch =
-            RegExp(r'''<iframe[^>]+src=["']([^"']+)["']''').firstMatch(res.body);
-        if (iframeMatch != null) {
-          final subMatch =
-              RegExp(r'/([a-fA-F0-9]{24})').firstMatch(iframeMatch.group(1)!);
-          if (subMatch != null) videoId = subMatch.group(1);
-        }
+      if (videoId == null) {
+        final fallback = RegExp(r'videos/([a-fA-F0-9]{24})').firstMatch(res.body);
+        if (fallback != null) videoId = fallback.group(1);
       }
 
       if (videoId == null) return null;
 
-      final configUrl = 'https://p1.spexliu.top/videos/$videoId/config';
-
-      final apiHeaders = Map<String, String>.from(baseHeaders);
-      apiHeaders.addAll({
-        'Origin': 'https://p1.spexliu.top',
-        'Referer': 'https://p1.spexliu.top/videos/$videoId/play',
+      const cdnHosts = ['e.streamforester.com', 'byzamlan.top'];
+      const configHeaders = <String, String>{
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Content-Type': 'application/json',
-      });
-
-      final apiRes = await http.post(Uri.parse(configUrl), headers: apiHeaders);
-
-      if (apiRes.statusCode == 200) {
-        final data = jsonDecode(apiRes.body);
-        final sources = data['sources'] as List?;
-        if (sources != null && sources.isNotEmpty) {
-          return sources[0]['file'] as String?;
+        'Referer': 'https://hentaivietsub.com/',
+        'Origin': 'https://hentaivietsub.com',
+        'Accept': 'application/json, text/plain, */*',
+      };
+      for (final host in cdnHosts) {
+        try {
+          final configUrl =
+              'https://$host/videos/$videoId/config?d=hentaivietsub.com';
+          final client = http.Client();
+          try {
+            var res = await client.post(Uri.parse(configUrl), headers: configHeaders);
+            var body = res.body;
+            var code = res.statusCode;
+            for (var i = 0; i < 5 && (code == 301 || code == 302 || code == 303 || code == 307 || code == 308); i++) {
+              final loc = res.headers['location'];
+              if (loc == null) break;
+              res = await client.post(Uri.parse(loc), headers: configHeaders);
+              body = res.body;
+              code = res.statusCode;
+            }
+            if (code == 200) {
+              final data = jsonDecode(body);
+              final sources = data['sources'] as List?;
+              if (sources != null && sources.isNotEmpty) {
+                final file = sources[0]['file'] as String?;
+                if (file != null) return file;
+              }
+            }
+          } finally {
+            client.close();
+          }
+        } catch (_) {
+          continue;
         }
       }
     } catch (e) {
@@ -452,14 +476,13 @@ query ($showId: String!, $translationType: VaildTranslationTypeEnumType!, $episo
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// VI ANIME CORE (PhimAPI — Vietsub)
+// VI ANIME CORE (OPhim — Vietsub, anime-focused)
 // ════════════════════════════════════════════════════════════════════════════
 
 class ViAnimeCore {
-  static const String baseUrl = 'https://phimapi.com';
+  static const String baseUrl = 'https://ophim1.com';
   static const String cdnImage = 'https://phimimg.com';
-  // ADDED THIS LINE TO FIX THE ERROR
-  static const String referer = 'https://phimapi.com'; 
+  static const String referer = 'https://ophim1.com';
 
   static const Map<String, String> _headers = {
     'User-Agent': 'AniCli-Flutter/2.0',
@@ -467,7 +490,7 @@ class ViAnimeCore {
 
   static Future<List<AnimeModel>> getTrending({int page = 1}) =>
       _fetchList(
-        '$baseUrl/v1/api/danh-sach/phim-le'
+        '$baseUrl/v1/api/danh-sach/hoat-hinh'
         '?page=$page&country=nhat-ban&limit=40'
         '&sort_field=modified.time&sort_type=desc',
       );
@@ -524,7 +547,11 @@ class ViAnimeCore {
       return items.map<AnimeModel>((item) {
         String thumb = item['poster_url'] ?? item['thumb_url'] ?? '';
         if (thumb.isNotEmpty && !thumb.startsWith('http')) {
-          thumb = thumb.startsWith('/') ? '$cdn$thumb' : '$cdn/$thumb';
+          if (thumb.startsWith('/')) {
+            thumb = '$cdn$thumb';
+          } else {
+            thumb = thumb.contains('/') ? '$cdn/$thumb' : '$cdn/uploads/movies/$thumb';
+          }
         }
         return AnimeModel(
           id: item['slug'] ?? '',
@@ -543,5 +570,105 @@ class ViAnimeCore {
     final episodes = data['episodes'] as List?;
     if (episodes == null || episodes.isEmpty) return null;
     return episodes[0]['server_data'] as List?;
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// PROVIDER COORDINATOR (new provider stack — replaces old cores)
+// ════════════════════════════════════════════════════════════════════════════
+
+class ProviderCoordinator {
+  static final ProviderRegistry _registry = ProviderRegistry()
+    ..register(SenshiProvider())
+    ..register(AnipubProvider())
+    ..register(AninekoProvider())
+    ..register(AllAnimeProvider())
+    ..register(AnimepaheProvider());
+
+  static ProviderRegistry get registry => _registry;
+
+  static Future<List<SelectionOption>> searchAll(String query, String mode,
+      {List<String>? providers}) async {
+    final list = providers ?? _registry.defaultStack;
+    final results = <SelectionOption>[];
+    for (final id in list) {
+      try {
+        final p = _registry.provider(id);
+        final r = query.isEmpty
+            ? await p.getTrending(mode)
+            : await p.searchAnime(query, mode);
+        results.addAll(r);
+      } catch (e) {
+        debugPrint('$id ${query.isEmpty ? "trending" : "search"} error: $e');
+      }
+    }
+    if (results.isEmpty) throw Exception('No results from any provider');
+    return results;
+  }
+
+  static Future<List<AnimeModel>> searchAsAnimeModel(
+    String query,
+    String mode, {
+    List<String>? providers,
+  }) async {
+    final options = await searchAll(query, mode, providers: providers);
+    return options
+        .map((opt) {
+          final qid = makeQualifiedId(opt.extraData, opt.key, providers?.first ?? _registry.defaultStack.first);
+          return AnimeModel(
+            id: qid,
+            name: opt.title,
+            thumbnail: opt.thumbnail,
+            isManga: false,
+            sourceId: qid,
+          );
+        })
+        .toList();
+  }
+
+  static Future<List<String>> episodesList(
+    String qualifiedId,
+    String mode,
+  ) async {
+    final (providerId, showId) = parseQualifiedIdUnsafe(qualifiedId);
+    final p = _registry.provider(providerId);
+    return p.episodesList(showId, mode);
+  }
+
+  static Future<Map<String, StreamPlaybackHint>> getStreamsWithHints(
+    String qualifiedId,
+    int epNo,
+    String mode, {
+    PlaybackConfig? config,
+  }) async {
+    final (providerId, showId) = parseQualifiedIdUnsafe(qualifiedId);
+    final p = _registry.provider(providerId);
+    final cfg = config ?? PlaybackConfig(subOrDub: mode);
+    return p.getEpisodeUrlForModeWithHints(cfg, showId, epNo, mode);
+  }
+
+  static Future<List<String>> getStreamUrls(
+    String qualifiedId,
+    int epNo,
+    String mode,
+  ) async {
+    final hints = await getStreamsWithHints(qualifiedId, epNo, mode);
+    return hints.keys.toList();
+  }
+
+  static Future<String?> getStreamUrl(
+    String qualifiedId,
+    String episodeNum,
+    String mode,
+  ) async {
+    final epNo = int.tryParse(episodeNum);
+    if (epNo == null) return null;
+    try {
+      final urls = await getStreamUrls(qualifiedId, epNo, mode);
+      return urls.isNotEmpty ? urls.first : null;
+    } catch (e) {
+      debugPrint('ProviderCoordinator.getStreamUrl error: $e');
+      return null;
+    }
   }
 }
