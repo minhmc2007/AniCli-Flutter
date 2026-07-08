@@ -27,7 +27,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 // Global Definitions & App State
-const String kAppVersion = "1.8.9 Open Beta";
+const String kAppVersion = "1.8.9";
 const String kBuildNumber = "189";
 const kColorCream = Color(0xFFFEEAC9);
 const kColorPeach = Color(0xFFFFCDC9);
