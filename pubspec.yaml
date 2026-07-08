@@ -32,10 +32,11 @@ dependencies:
   # Permissions (for Android/iOS)
   permission_handler: ^12.0.1
   path_provider: ^2.1.1
-  open_file: ^3.5.11
+  open_file: ^4.0.0
   crypto: ^3.0.3
   encrypt: ^5.0.3
-  webview_flutter: ^4.10.0
+  pointycastle: ^3.9.1
+  flutter_inappwebview: ^6.1.0
 dev_dependencies:
   flutter_test:
     sdk: flutter

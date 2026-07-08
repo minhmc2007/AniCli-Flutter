@@ -1,14 +1,7 @@
 import 'dart:convert';
-import 'package:crypto/crypto.dart' show sha256;
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-
-// Debug logging toggle — set to true to see AllManga API flow
-bool _mangaDebug = true;
-void _log(String msg) {
-  if (_mangaDebug) debugPrint('[AllMangaCore] $msg');
-}
 
 // ════════════════════════════════════════════════════════════════════════════
 // SHARED MODEL
@@ -74,6 +67,16 @@ class AnimeModel {
     );
   }
 
+  factory AnimeModel.fromTruyenQQ(Map<String, dynamic> json) {
+    return AnimeModel(
+      id: json['slug'] ?? '',
+      name: json['name'] ?? 'Unknown',
+      thumbnail: json['thumbnail'],
+      isManga: true,
+      sourceId: 'truyenqq',
+    );
+  }
+
   Map<String, dynamic> toJson() => {
         'id': id,
         'name': name,
@@ -92,38 +95,70 @@ class AnimeModel {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+// HELPERS
+// ════════════════════════════════════════════════════════════════════════════
+
+String _decodeHtmlEntities(String text) {
+  return text
+      .replaceAll('&#39;', "'")
+      .replaceAll('&amp;', '&')
+      .replaceAll('&lt;', '<')
+      .replaceAll('&gt;', '>')
+      .replaceAll('&quot;', '"')
+      .replaceAll('&#x27;', "'")
+      .replaceAll('&#x2F;', '/')
+      .replaceAllMapped(RegExp(r'&#(\d+);'), (m) => String.fromCharCode(int.parse(m.group(1)!)));
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 // MANGA SOURCE PROVIDER
 // ════════════════════════════════════════════════════════════════════════════
 
-enum MangaSource { mangadex, allanime, zettruyen }
+enum MangaSource { mangadex, zettruyen, weebcentral, truyenqq, en, vi }
 
 class MangaSourceProvider extends ChangeNotifier {
   static const _key = 'manga_source';
-  MangaSource _source = MangaSource.allanime;
+  MangaSource _source = MangaSource.mangadex;
+  bool _loaded = false;
 
   MangaSource get source => _source;
-  bool get isAllManga => _source == MangaSource.allanime;
+  bool get isMangaDex => _source == MangaSource.mangadex;
   bool get isZetTruyen => _source == MangaSource.zettruyen;
+  bool get isWeebCentral => _source == MangaSource.weebcentral;
+  bool get isTruyenQQ => _source == MangaSource.truyenqq;
+  bool get isEn => _source == MangaSource.en;
+  bool get isVi => _source == MangaSource.vi;
 
   MangaSourceProvider() {
     _load();
   }
 
   Future<void> _load() async {
+    if (_loaded) return;
     final prefs = await SharedPreferences.getInstance();
+    if (_loaded) return;
     final raw = prefs.getString(_key);
-    if (raw == 'mangadex') {
-      _source = MangaSource.mangadex;
-    } else if (raw == 'zettruyen') {
+    if (_loaded) return;
+    if (raw == 'zettruyen') {
       _source = MangaSource.zettruyen;
+    } else if (raw == 'weebcentral') {
+      _source = MangaSource.weebcentral;
+    } else if (raw == 'truyenqq') {
+      _source = MangaSource.truyenqq;
+    } else if (raw == 'en') {
+      _source = MangaSource.en;
+    } else if (raw == 'vi') {
+      _source = MangaSource.vi;
     } else {
-      _source = MangaSource.allanime;
+      _source = MangaSource.mangadex;
     }
+    _loaded = true;
     notifyListeners();
   }
 
   Future<void> setSource(MangaSource s) async {
     _source = s;
+    _loaded = true;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_key, s.name);
     notifyListeners();
@@ -135,7 +170,7 @@ class MangaSourceProvider extends ChangeNotifier {
 // ════════════════════════════════════════════════════════════════════════════
 
 class ZetTruyenCore {
-  static const String _baseUrl = 'https://www.zettruyen.africa';
+  static const String _baseUrl = 'https://www.zettruyen.ink';
 
   static const Map<String, String> _apiHeaders = {
     'accept': 'application/json, text/javascript, */*; q=0.01',
@@ -155,78 +190,83 @@ class ZetTruyenCore {
         'Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Mobile Safari/537.36',
   };
 
-  /// Returns a merged trending list from top_day + top_week + top_month,
-  /// deduplicated by slug, then padded with the first page of the browse
-  /// endpoint so the UI always has plenty of cards to show.
-  ///
-  /// Why: /api/comics/top only has ~5 entries per period bucket. The Python
-  /// CLI sliced to [:5] for terminal display — a Flutter UI should show all
-  /// available content with a scroll.
   static Future<List<AnimeModel>> getTrending() async {
-    final seen = <String>{};
-    final result = <AnimeModel>[];
-
-    // 1. Merge all three top-period buckets from /api/comics/top
+    final results = <AnimeModel>[];
     try {
-      final res = await http.get(
-          Uri.parse('$_baseUrl/api/comics/top'), headers: _apiHeaders);
+      final res = await http.get(Uri.parse(_baseUrl), headers: _htmlHeaders);
       if (res.statusCode == 200) {
-        final data = jsonDecode(res.body)?['data'] ?? {};
-        for (final key in ['top_day', 'top_week', 'top_month']) {
-          for (final e in (data[key] as List? ?? [])) {
-            final slug = (e['slug'] ?? '') as String;
-            if (slug.isNotEmpty && seen.add(slug)) {
-              result.add(AnimeModel.fromZetTruyen(e));
-            }
-          }
+        final html = res.body;
+        final topWeekStart = html.indexOf('data-category="top_week"');
+        if (topWeekStart == -1) return results;
+        final topMonthStart = html.indexOf('data-category="top_month"', topWeekStart);
+        final section = topMonthStart > topWeekStart
+            ? html.substring(topWeekStart, topMonthStart)
+            : html.substring(topWeekStart);
+        final entryPattern = RegExp(
+            r'href="/truyen-tranh/([^"]+)"\s*title="([^"]*)"[^>]*>'
+            r'\s*<img\s+alt="[^"]*"\s+[^>]*src="([^"]+)"',
+            caseSensitive: false);
+        for (final m in entryPattern.allMatches(section)) {
+          final slug = m.group(1)!;
+          final name = _decodeHtmlEntities(m.group(2)!.trim());
+          var cover = m.group(3)!;
+          if (cover.startsWith('/')) cover = '$_baseUrl$cover';
+          results.add(AnimeModel(
+            id: slug,
+            name: name,
+            thumbnail: cover,
+            isManga: true,
+            sourceId: 'zettruyen',
+          ));
         }
       }
     } catch (_) {}
-
-    // 2. Pad with the latest-updated comics page so there is always more content
-    try {
-      final res = await http.get(
-          Uri.parse('$_baseUrl/api/comics?page=1&per_page=20&order=latest'),
-          headers: _apiHeaders);
-      if (res.statusCode == 200) {
-        final data = jsonDecode(res.body);
-        final List items = data['data']?['comics'] ?? data['data'] ?? [];
-        for (final e in items) {
-          final slug = (e['slug'] ?? '') as String;
-          if (slug.isNotEmpty && seen.add(slug)) {
-            result.add(AnimeModel.fromZetTruyen(e));
-          }
-        }
-      }
-    } catch (_) {}
-
-    return result;
+    return results;
   }
 
-  /// Fetch a specific page of comics (for infinite-scroll / load-more UIs).
-  /// [page] is 1-based. Returns an empty list on error or end of data.
   static Future<List<AnimeModel>> browse({int page = 1, int perPage = 20}) async {
     try {
       final res = await http.get(
-          Uri.parse(
-              '$_baseUrl/api/comics?page=$page&per_page=$perPage&order=latest'),
-          headers: _apiHeaders);
+          Uri.parse('$_baseUrl/tim-kiem-nang-cao?page=$page&limit=$perPage'),
+          headers: _htmlHeaders);
       if (res.statusCode == 200) {
-        final data = jsonDecode(res.body);
-        final List items = data['data']?['comics'] ?? data['data'] ?? [];
-        return items.map((e) => AnimeModel.fromZetTruyen(e)).toList();
+        return _parseBrowse(res.body);
       }
     } catch (_) {}
     return [];
   }
 
+  static List<AnimeModel> _parseBrowse(String html) {
+    final results = <AnimeModel>[];
+    final entryPattern = RegExp(
+        r'href="/truyen-tranh/([^"]+)"\s*title="([^"]*)"[^>]*>'
+        r'\s*<img\s+[^>]*src="([^"]+)"',
+        caseSensitive: false);
+    for (final m in entryPattern.allMatches(html)) {
+      final slug = m.group(1)!;
+      final name = _decodeHtmlEntities(m.group(2)!.trim());
+      var cover = m.group(3)!;
+      if (cover.startsWith('/')) cover = '$_baseUrl$cover';
+      results.add(AnimeModel(
+        id: slug,
+        name: name,
+        thumbnail: cover,
+        isManga: true,
+        sourceId: 'zettruyen',
+      ));
+    }
+    return results;
+  }
+
   static Future<List<AnimeModel>> search(String query) async {
     if (query.trim().isEmpty) return getTrending();
     try {
+      debugPrint('[ZetTruyen] search q=$query');
       final res = await http.get(
           Uri.parse(
               '$_baseUrl/api/quick-search?q=${Uri.encodeQueryComponent(query.trim())}'),
           headers: _apiHeaders);
+      debugPrint('[ZetTruyen] search status=${res.statusCode} body=${res.body.substring(0, res.body.length.clamp(0, 1000))}');
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         final List results = data['data'] ?? [];
@@ -238,10 +278,12 @@ class ZetTruyenCore {
 
   static Future<List<String>> getChapters(String mangaSlug) async {
     try {
+      debugPrint('[ZetTruyen] GET chapters $mangaSlug');
       final res = await http.get(
           Uri.parse(
               '$_baseUrl/api/comics/$mangaSlug/chapters?per_page=-1&order=desc'),
           headers: _apiHeaders);
+      debugPrint('[ZetTruyen] chapters status=${res.statusCode}');
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         final List chapters = data['data']?['chapters'] ?? [];
@@ -266,8 +308,6 @@ class ZetTruyenCore {
     try {
       var res = await http.get(Uri.parse(url), headers: _htmlHeaders);
 
-      // FIX: handle 404 caused by 'chapter-' vs 'chuong-' slug mismatch
-      // (matches Python fallback logic exactly)
       if (res.statusCode == 404) {
         String altSlug = chapterSlug;
         if (altSlug.contains('chapter-')) {
@@ -282,7 +322,7 @@ class ZetTruyenCore {
       if (res.statusCode == 200) {
         final html = res.body;
         final regExp =
-            RegExp(r'(https?://[^"' "'" r' ]*(?:zetimage\.com)[^"' "'" r' ]*)');
+            RegExp("(https?://[^\"' ]*(?:zetimage\\.com)[^\"' ]*)");
         final matches = regExp.allMatches(html);
 
         for (final match in matches) {
@@ -299,7 +339,6 @@ class ZetTruyenCore {
         }
       }
 
-      // Fallback: sequential brute-force up to 200 pages (aligned with Python)
       if (pageUrls.isEmpty) {
         for (int page = 1; page <= 200; page++) {
           final fallbackUrl =
@@ -343,14 +382,23 @@ class MangaCore {
     for (final r in ['safe', 'suggestive', 'erotica', 'pornographic']) {
       sb.write('&contentRating[]=$r');
     }
+    final url = sb.toString();
+    debugPrint('[MangaCore] search url=$url');
     try {
       final res =
-          await http.get(Uri.parse(sb.toString()), headers: _headers);
+          await http.get(Uri.parse(url), headers: _headers);
+      debugPrint('[MangaCore] search status=${res.statusCode}');
       if (res.statusCode == 200) {
-        final List results = jsonDecode(res.body)['data'];
+        final body = jsonDecode(res.body);
+        final List results = body['data'] ?? [];
+        debugPrint('[MangaCore] search got ${results.length} results');
         return results.map((e) => AnimeModel.fromMangaDex(e)).toList();
+      } else {
+        debugPrint('[MangaCore] search body=${res.body.substring(0, res.body.length.clamp(0, 300))}');
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[MangaCore] search error: $e');
+    }
     return [];
   }
 
@@ -411,6 +459,19 @@ class MangaCore {
     return null;
   }
 
+  static Future<int> countENChapters(String mangaId) async {
+    try {
+      final res = await http.get(
+          Uri.parse(
+              '$_baseUrl/manga/$mangaId/feed?limit=1&order[chapter]=desc&translatedLanguage[]=en'),
+          headers: _headers);
+      if (res.statusCode == 200) {
+        return jsonDecode(res.body)['total'] ?? 0;
+      }
+    } catch (_) {}
+    return 0;
+  }
+
   static List<String> _numericSort(List<String> list) {
     list.sort((a, b) {
       final numA = double.tryParse(a.split('|')[1].split(' ')[0]) ?? 0;
@@ -422,267 +483,438 @@ class MangaCore {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// ALLMANGA CORE
+// WEBCENTRAL CORE
 // ════════════════════════════════════════════════════════════════════════════
 
-class AllMangaCore {
-  static const String _apiUrl = 'https://api.allanime.day/api';
-  static const String _coverServer =
-      'https://wp.youtube-anime.com/aln.youtube-anime.com';
-  static const String _searchHash =
-      '2d48e19fb67ddcac42fbb885204b6abb0a84f406f15ef83f36de4a66f49f651a';
-  static const String _detailHash =
-      'd77781dcf964b97aea0be621dbde430e89e200b58526823ee6010dd11c3ca96a';
+class WeebCentralCore {
+  static const String _baseUrl = 'https://weebcentral.com';
 
-  static const String _chapterQuery =
-      r'query($mangaId:String!,$translationType:VaildTranslationTypeMangaEnumType!,$chapterString:String!,$search:SearchInput){chapter(mangaId:$mangaId,translationType:$translationType,chapterString:$chapterString,search:$search){_id pictureUrls pictureUrlHead}}';
-
-  static const Map<String, String> _apiHeaders = {
-    'accept': '*/*',
-    'origin': 'https://allmanga.to',
-    'referer': 'https://allmanga.to/',
+  static const Map<String, String> _headers = {
+    'accept':
+        'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8,application/json',
+    'accept-language': 'en-US,en;q=0.5',
+    'referer': 'https://google.com',
     'user-agent':
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0',
+    'dnt': '1',
+    'connection': 'keep-alive',
   };
 
-  static const Map<String, String> pageHeaders = {
-    'User-Agent':
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Referer': 'https://allmanga.to/',
-    'Origin': 'https://allmanga.to',
-  };
-
-  static const Map<String, String> coverHeaders = {
-    'User-Agent':
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Referer': 'https://allmanga.to/',
-  };
-
-  static Future<List<AnimeModel>> search(String query) async {
-    final variables = {
-      'search': {'query': query.trim(), 'isManga': true},
-      'limit': 26,
-      'page': 1,
-      'translationType': 'sub',
-      'countryOrigin': 'ALL'
-    };
+  static Future<List<AnimeModel>> getTrending() async {
     try {
-      _log('search query="$query"');
-      final data = await _persistedGet(variables, _searchHash);
-      final List edges = data['data']?['mangas']?['edges'] ?? [];
-      _log('search returned ${edges.length} results');
-      return edges.map((e) => _fromEdge(e)).toList();
+      debugPrint('[WeebCentral] GET $_baseUrl');
+      final res = await http.get(Uri.parse(_baseUrl), headers: _headers);
+      debugPrint('[WeebCentral] status=${res.statusCode}');
+      if (res.statusCode == 200) {
+        debugPrint('[WeebCentral] body=${res.body.substring(0, res.body.length.clamp(0, 500))}');
+        final parsed = _parseHomepage(res.body);
+        debugPrint('[WeebCentral] parsed ${parsed.length} results');
+        return parsed;
+      }
     } catch (e) {
-      _log('search error: $e');
-      return [];
+      debugPrint('[WeebCentral] error: $e');
     }
+    return [];
   }
 
-  static Future<List<AnimeModel>> getTrending() => search('');
+  static Future<List<AnimeModel>> search(String query) async {
+    if (query.trim().isEmpty) return getTrending();
+    final url =
+        '$_baseUrl/search/data?text=${Uri.encodeQueryComponent(query.trim())}&limit=24&offset=0&sort=Best+Match&order=Descending&official=Any&anime=Any&adult=Any&display_mode=Full+Display';
+    try {
+      debugPrint('[WeebCentral] search url=$url');
+      final res = await http.get(Uri.parse(url), headers: _headers);
+      debugPrint('[WeebCentral] search status=${res.statusCode}');
+      if (res.statusCode == 200) {
+        debugPrint('[WeebCentral] search body=${res.body.substring(0, res.body.length.clamp(0, 500))}');
+        final parsed = _parseSearch(res.body);
+        debugPrint('[WeebCentral] search parsed ${parsed.length} results');
+        return parsed;
+      }
+    } catch (e) {
+      debugPrint('[WeebCentral] search error: $e');
+    }
+    return [];
+  }
+
+  static List<AnimeModel> _parseHomepage(String html) {
+    final results = <AnimeModel>[];
+    // Split by article.bg-base-300 to get individual entries
+    final articles = html.split('<article class="bg-base-300');
+    for (int i = 1; i < articles.length; i++) {
+      final article = articles[i];
+      final idMatch = RegExp(r'/series/([^"/]+)').firstMatch(article);
+      if (idMatch == null) continue;
+      final id = idMatch.group(1)!;
+      final altMatch = RegExp(r'alt="([^"]+)\s*cover"').firstMatch(article);
+      final name = altMatch != null ? _decodeHtmlEntities(altMatch.group(1)!.trim()) : 'Unknown';
+      final coverMatch = RegExp(r'<source\s+srcset="([^"]+)"').firstMatch(article);
+      results.add(AnimeModel(
+        id: id,
+        name: name,
+        thumbnail: coverMatch?.group(1),
+        isManga: true,
+        sourceId: 'weebcentral',
+      ));
+    }
+    return results;
+  }
+
+  static List<AnimeModel> _parseSearch(String html) {
+    final results = <AnimeModel>[];
+    final articles = html.split('<article class="bg-base-300');
+    for (int i = 1; i < articles.length; i++) {
+      final article = articles[i];
+      final idMatch = RegExp(r'/series/([^"/]+)').firstMatch(article);
+      if (idMatch == null) continue;
+      final id = idMatch.group(1)!;
+      final altMatch = RegExp(r'alt="([^"]+)"').firstMatch(article);
+      String name = 'Unknown';
+      if (altMatch != null) {
+        name = altMatch.group(1)!.replaceAll(RegExp(r'\s*cover$'), '').trim();
+        name = _decodeHtmlEntities(name);
+      }
+      final coverMatch = RegExp(r'<source\s+srcset="([^"]+)"').firstMatch(article);
+      results.add(AnimeModel(
+        id: id,
+        name: name,
+        thumbnail: coverMatch?.group(1),
+        isManga: true,
+        sourceId: 'weebcentral',
+      ));
+    }
+    return results;
+  }
 
   static Future<List<String>> getChapters(String mangaId) async {
+    final url = '$_baseUrl/series/$mangaId';
     try {
-      _log('getChapters mangaId=$mangaId');
-      final data = await _persistedGet(
-          {
-            '_id': mangaId,
-            'search': {'allowAdult': false, 'allowUnknown': false}
-          },
-          _detailHash);
-      final detail = data['data']?['manga']?['availableChaptersDetail'];
-      if (detail == null) {
-        _log('getChapters availableChaptersDetail is null');
-        return [];
+      debugPrint('[WeebCentral] chapters url=$url');
+      final res = await http.get(Uri.parse(url), headers: _headers);
+      debugPrint('[WeebCentral] chapters status=${res.statusCode}');
+      if (res.statusCode == 200) {
+        return _parseChapters(res.body);
       }
-      _log('getChapters detail keys=${(detail as Map).keys.join(", ")}');
-      final List raw =
-          (detail['sub'] ?? detail['raw'] ?? detail['dub'] ?? []) as List;
-      _log('getChapters raw has ${raw.length} chapters');
-      final List<String> strList = raw.map((c) => c.toString()).toList();
-      strList.sort((a, b) {
-        double nA = double.tryParse(a) ?? 0;
-        double nB = double.tryParse(b) ?? 0;
-        return nB.compareTo(nA);
-      });
-      _log('getChapters returning ${strList.length} chapters: ${strList.take(5).join(", ")}');
-      return strList;
     } catch (e) {
-      _log('getChapters error: $e');
-      return [];
+      debugPrint('[WeebCentral] chapters error: $e');
     }
+    return [];
+  }
+
+  static List<String> _parseChapters(String html) {
+    final results = <String>[];
+    final parts = html.split('chapters/');
+    for (int i = 1; i < parts.length; i++) {
+      final part = parts[i];
+      final idMatch = RegExp(r'^([^"<>\s]+)').firstMatch(part);
+      if (idMatch == null) continue;
+      final id = idMatch.group(1)!.trim();
+      final spanMatch = RegExp(r'<span[^>]*class="grow[^"]*"[^>]*>.*?<span[^>]*>([^<]+)</span>', dotAll: true).firstMatch(part);
+      if (spanMatch == null) continue;
+      final label = spanMatch.group(1)!.trim();
+      final numMatch = RegExp(r'(\d+[\.\d]*)').firstMatch(label);
+      if (numMatch == null) continue;
+      final num = numMatch.group(1)!.trim();
+      results.add('$id|$label|$num');
+    }
+    return results;
+  }
+
+  static Future<List<String>> getPages(String mangaId, String chapterString) async {
+    final chapterId = chapterString.contains('|')
+        ? chapterString.split('|')[0].trim()
+        : chapterString.trim();
+    final url =
+        '$_baseUrl/chapters/$chapterId/images?is_prev=False&current_page=1&reading_style=long_strip';
+    try {
+      final res = await http.get(Uri.parse(url), headers: _headers);
+      if (res.statusCode == 200) {
+        return _parsePageImages(res.body);
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  static List<String> _parsePageImages(String html) {
+    final results = <String>[];
+    final imgRegex = RegExp(r'<img\s+[^>]*src="(https://[^"]+)"');
+    for (final m in imgRegex.allMatches(html)) {
+      final url = m.group(1)!;
+      if (!results.contains(url)) results.add(url);
+    }
+    return results;
+  }
+
+  static Future<int> countChapters(String mangaId) async {
+    try {
+      final res = await http.get(
+          Uri.parse('$_baseUrl/series/$mangaId'), headers: _headers);
+      if (res.statusCode == 200) {
+        return RegExp(r'chapters/').allMatches(res.body).length;
+      }
+    } catch (_) {}
+    return 0;
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// EN MANGA AGGREGATOR (MangaDex + WeebCentral)
+// ════════════════════════════════════════════════════════════════════════════
+
+class EnMangaCore {
+  static Future<List<AnimeModel>> getTrending() => _searchMangaDex('');
+
+  static Future<List<AnimeModel>> search(String query) async {
+    if (query.trim().isEmpty) return getTrending();
+    final results = await Future.wait([
+      _searchMangaDex(query.trim()),
+      WeebCentralCore.search(query.trim()),
+    ]);
+    return _merge(results[0], results[1]);
+  }
+
+  static Future<List<AnimeModel>> _searchMangaDex(String query) async {
+    final sb = StringBuffer(
+        'https://api.mangadex.org/manga?limit=20&offset=0&availableTranslatedLanguage[]=en');
+    if (query.isNotEmpty) {
+      sb.write('&title=${Uri.encodeQueryComponent(query)}');
+    }
+    sb.write('&order[followedCount]=desc&includes[]=cover_art');
+    for (final r in ['safe', 'suggestive', 'erotica', 'pornographic']) {
+      sb.write('&contentRating[]=$r');
+    }
+    try {
+      final res = await http
+          .get(Uri.parse(sb.toString()), headers: MangaCore._headers);
+      if (res.statusCode == 200) {
+        final List items = jsonDecode(res.body)['data'] ?? [];
+        return items.map((e) => AnimeModel.fromMangaDex(e)).toList();
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  static String _normalize(String s) {
+    return s.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+  }
+
+  static List<AnimeModel> _merge(
+      List<AnimeModel> dex, List<AnimeModel> wc) {
+    final byKey = <String, List<AnimeModel>>{};
+    for (final m in dex) {
+      byKey.putIfAbsent(_normalize(m.name), () => []).add(m);
+    }
+    for (final m in wc) {
+      final key = _normalize(m.name);
+      if (!byKey.containsKey(key)) {
+        byKey[key] = [m];
+      } else {
+        byKey[key]!.add(m);
+      }
+    }
+    final result = <AnimeModel>[];
+    for (final entry in byKey.entries) {
+      final list = entry.value;
+      if (list.length == 1) {
+        result.add(list[0]);
+      } else {
+        final dexManga = list.firstWhere((m) => m.sourceId == 'mangadex',
+            orElse: () => list[0]);
+        result.add(dexManga);
+      }
+    }
+      return result;
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// VI MANGA AGGREGATOR (ZetTruyen + TruyenQQ)
+// ════════════════════════════════════════════════════════════════════════════
+
+class ViMangaCore {
+  static Future<List<AnimeModel>> getTrending() async {
+    final results = await Future.wait([
+      ZetTruyenCore.getTrending(),
+      TruyenQQCore.getTrending(),
+    ]);
+    return _merge(results[0], results[1]);
+  }
+
+  static Future<List<AnimeModel>> search(String query) async {
+    if (query.trim().isEmpty) return getTrending();
+    final results = await Future.wait([
+      ZetTruyenCore.search(query.trim()),
+      TruyenQQCore.search(query.trim()),
+    ]);
+    return _merge(results[0], results[1]);
+  }
+
+  static String _normalize(String s) {
+    return s.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+  }
+
+  static List<AnimeModel> _merge(
+      List<AnimeModel> zet, List<AnimeModel> qq) {
+    final byKey = <String, List<AnimeModel>>{};
+    for (final m in zet) {
+      byKey.putIfAbsent(_normalize(m.name), () => []).add(m);
+    }
+    for (final m in qq) {
+      final key = _normalize(m.name);
+      if (!byKey.containsKey(key)) {
+        byKey[key] = [m];
+      } else {
+        byKey[key]!.add(m);
+      }
+    }
+    final result = <AnimeModel>[];
+    for (final entry in byKey.entries) {
+      final list = entry.value;
+      if (list.length == 1) {
+        result.add(list[0]);
+      } else {
+        result.add(list.firstWhere((m) => m.sourceId == 'truyenqq',
+            orElse: () => list[0]));
+      }
+    }
+    return result;
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// TRUYENQQ CORE
+// ════════════════════════════════════════════════════════════════════════════
+
+class TruyenQQCore {
+  static const String _baseUrl = 'https://truyenqq.com.vn';
+
+  static const Map<String, String> _headers = {
+    'accept':
+        'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+    'accept-language': 'vi,en-US;q=0.9,en;q=0.8',
+    'user-agent':
+        'Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Mobile Safari/537.36',
+  };
+
+  static Future<List<AnimeModel>> getTrending() async {
+    final results = <AnimeModel>[];
+    try {
+      final res = await http.get(Uri.parse(_baseUrl), headers: _headers);
+      if (res.statusCode == 200) {
+        final html = res.body;
+        final storyStart = html.indexOf('id="contentstory"');
+        if (storyStart == -1) return results;
+        final innerStart = html.indexOf('<div class="inner">', storyStart);
+        if (innerStart == -1) return results;
+        final section = html.substring(innerStart);
+        final items = section.split('<div class="item">');
+        for (int i = 1; i < items.length; i++) {
+          final item = items[i];
+          final slugMatch = RegExp(r'href="/([^"]+)"').firstMatch(item);
+          if (slugMatch == null) continue;
+          final slug = slugMatch.group(1)!;
+          final srcMatch = RegExp(r'src="([^"]+)"').firstMatch(item);
+          final nameMatch = RegExp(r'alt="([^"]*)"').firstMatch(item);
+          final name = nameMatch != null ? _decodeHtmlEntities(nameMatch.group(1)!.trim()) : 'Unknown';
+          var cover = srcMatch?.group(1) ?? '';
+          if (cover.isNotEmpty && !cover.startsWith('http')) cover = '$_baseUrl$cover';
+          results.add(AnimeModel(
+            id: slug,
+            name: name,
+            thumbnail: cover.isNotEmpty ? cover : null,
+            isManga: true,
+            sourceId: 'truyenqq',
+          ));
+        }
+      }
+    } catch (_) {}
+    return results;
+  }
+
+  static Future<List<AnimeModel>> search(String query) async {
+    if (query.trim().isEmpty) return getTrending();
+    final results = <AnimeModel>[];
+    try {
+      final res = await http.get(
+          Uri.parse(
+              '$_baseUrl/tim-kiem?s=${Uri.encodeQueryComponent(query.trim())}'),
+          headers: _headers);
+      if (res.statusCode == 200) {
+        final html = res.body;
+        final listingStart = html.indexOf('<div class="listing">');
+        if (listingStart == -1) return results;
+        final listingEnd = html.indexOf('<div class="pagination"', listingStart);
+        final section = listingEnd > listingStart
+            ? html.substring(listingStart, listingEnd)
+            : html.substring(listingStart);
+        final items = section.split('<div class="item">');
+        for (int i = 1; i < items.length; i++) {
+          final item = items[i];
+          final slugMatch = RegExp(r'href="/([^"]+)"').firstMatch(item);
+          if (slugMatch == null) continue;
+          final slug = slugMatch.group(1)!;
+          final srcMatch = RegExp(r'src="([^"]+)"').firstMatch(item);
+          final nameMatch = RegExp(r'<h3>\s*<a[^>]*>([^<]+)</a>').firstMatch(item);
+          final name = nameMatch != null ? _decodeHtmlEntities(nameMatch.group(1)!.trim()) : 'Unknown';
+          var cover = srcMatch?.group(1) ?? '';
+          if (cover.isNotEmpty && !cover.startsWith('http')) cover = '$_baseUrl$cover';
+          results.add(AnimeModel(
+            id: slug,
+            name: name,
+            thumbnail: cover.isNotEmpty ? cover : null,
+            isManga: true,
+            sourceId: 'truyenqq',
+          ));
+        }
+      }
+    } catch (_) {}
+    return results;
+  }
+
+  static Future<List<String>> getChapters(String mangaSlug) async {
+    final results = <String>[];
+    try {
+      final res = await http.get(
+          Uri.parse('$_baseUrl/$mangaSlug'), headers: _headers);
+      if (res.statusCode == 200) {
+        final html = res.body;
+        final listStart = html.indexOf('<div id="chapter-list"');
+        if (listStart == -1) return results;
+        final chapterRegex = RegExp(
+            r'<a\s+href="/([^"]+)"\s+class="chapter-name[^"]*"[^>]*>([^<]+)</a>',
+            caseSensitive: false);
+        for (final m in chapterRegex.allMatches(html, listStart)) {
+          final chapterSlug = m.group(1)!;
+          final chapterName = _decodeHtmlEntities(m.group(2)!.trim());
+          final numMatch = RegExp(r'[\d.]+').firstMatch(chapterName);
+          final num = numMatch?.group(0) ?? '0';
+          results.add('$chapterSlug|$chapterName|$num');
+        }
+      }
+    } catch (_) {}
+    return results;
   }
 
   static Future<List<String>> getPages(
-      String mangaId, String chapterString) async {
-    _log('getPages mangaId=$mangaId chapterString=$chapterString');
-    final cleanChapter = chapterString.contains('|')
-        ? chapterString.split('|')[1].trim()
+      String mangaSlug, String chapterString) async {
+    final chapterSlug = chapterString.contains('|')
+        ? chapterString.split('|')[0].trim()
         : chapterString.trim();
-    _log('getPages cleanChapter=$cleanChapter');
-
-    _log('getPages calling _apqGet with translationType=sub');
-    final data = await _apqGet({
-      'mangaId': mangaId,
-      'translationType': 'sub',
-      'chapterString': cleanChapter,
-      'search': {'allowAdult': true, 'allowUnknown': true},
-    }, _chapterQuery);
-
-    if (data == null) {
-      _log('getPages _apqGet returned null — all paths failed');
-      return [];
-    }
-    _log('getPages _apqGet returned ${jsonEncode(data).length} chars');
-
-    final chapter = data['data']?['chapter'] as Map<String, dynamic>?;
-    if (chapter == null) {
-      _log('getPages data.data.chapter is null — response=${jsonEncode(data).substring(0, (jsonEncode(data).length).clamp(0, 500))}');
-      return [];
-    }
-    _log('getPages chapter keys=${chapter.keys.join(", ")}');
-
-    final pictureUrlHead = chapter['pictureUrlHead'] as String? ?? '';
-    final pictureUrls = chapter['pictureUrls'] as List? ?? [];
-    _log('getPages pictureUrlHead="$pictureUrlHead" pictureUrls.length=${pictureUrls.length}');
-    if (pictureUrls.isNotEmpty) {
-      _log('getPages first 3 pictureUrls=${pictureUrls.take(3).join(", ")}');
-    }
-
-    final allUrls = <String>[];
-    for (final url in pictureUrls) {
-      final urlStr = url.toString();
-      if (urlStr.isEmpty) continue;
-      final fullUrl = urlStr.startsWith('http')
-          ? urlStr
-          : '$pictureUrlHead$urlStr';
-      if (!allUrls.contains(fullUrl)) {
-        allUrls.add(fullUrl);
-      }
-    }
-    _log('getPages returning ${allUrls.length} URLs');
-    if (allUrls.isNotEmpty) {
-      _log('getPages first URL=${allUrls.first}');
-    }
-    return allUrls;
-  }
-
-  static Future<Map<String, dynamic>> _persistedGet(
-      Map<String, dynamic> variables, String hash) async {
-    final extensions = {
-      'persistedQuery': {'version': 1, 'sha256Hash': hash}
-    };
-    final uri = Uri.parse(_apiUrl).replace(queryParameters: {
-      'variables': jsonEncode(variables),
-      'extensions': jsonEncode(extensions)
-    });
-    _log('_persistedGet GET $uri');
-    _log('_persistedGet variables=${jsonEncode(variables)}');
-    final res = await http.get(uri, headers: _apiHeaders);
-    _log('_persistedGet status=${res.statusCode}');
-    if (res.statusCode == 200) {
-      final body = utf8.decode(res.bodyBytes);
-      _log('_persistedGet body=${body.substring(0, body.length.clamp(0, 800))}');
-      return jsonDecode(body);
-    }
-    _log('_persistedGet FAILED status=${res.statusCode} body=${utf8.decode(res.bodyBytes)}');
-    throw Exception('API Error');
-  }
-
-  static String _sha256hex(String input) =>
-      sha256.convert(utf8.encode(input)).toString();
-
-  static Future<Map<String, dynamic>?> _apqGet(
-      Map<String, dynamic> variables, String queryString) async {
-    final hash = _sha256hex(queryString);
-    _log('_apqGet queryHash=$hash');
-    _log('_apqGet queryString=$queryString');
-    _log('_apqGet variables=${jsonEncode(variables)}');
-    final extensions = {
-      'persistedQuery': {'version': 1, 'sha256Hash': hash}
-    };
-
-    final uri = Uri.parse(_apiUrl).replace(queryParameters: {
-      'variables': jsonEncode(variables),
-      'extensions': jsonEncode(extensions)
-    });
-    _log('_apqGet GET $uri');
-
+    final results = <String>[];
     try {
-      final getRes = await http.get(uri, headers: _apiHeaders);
-      _log('_apqGet GET status=${getRes.statusCode}');
-      if (getRes.statusCode == 200) {
-        final body = utf8.decode(getRes.bodyBytes);
-        _log('_apqGet GET body=${body.substring(0, body.length.clamp(0, 800))}');
-        final data = jsonDecode(body) as Map<String, dynamic>;
-        final errors = data['errors'] as List?;
-        if (errors != null) {
-          _log('_apqGet GET returned errors=${jsonEncode(errors)}');
-          for (final err in errors) {
-            final ext = err['extensions'] as Map?;
-            if (ext != null &&
-                ext['code'] == 'PERSISTED_QUERY_NOT_FOUND') {
-              _log('_apqGot PERSISTED_QUERY_NOT_FOUND → falling back to POST register');
-              return await _apqRegister(variables, queryString, extensions);
-            }
-          }
-          return data;
+      final res = await http.get(
+          Uri.parse('$_baseUrl/$chapterSlug'), headers: _headers);
+      if (res.statusCode == 200) {
+        final html = res.body;
+        final imgRegex = RegExp(r'<img\s+[^>]*src="(https://[^"]+\.(jpg|png|webp)[^"]*)"');
+        for (final m in imgRegex.allMatches(html)) {
+          final url = m.group(1)!;
+          if (!results.contains(url)) results.add(url);
         }
-        _log('_apqGet GET succeeded with data');
-        return data;
       }
-      _log('_apqGet GET non-200 — falling back to POST register');
-    } catch (e) {
-      _log('_apqGet GET exception: $e — falling back to POST register');
-    }
-
-    return await _apqRegister(variables, queryString, extensions);
+    } catch (_) {}
+    return results;
   }
+}
 
-  static Future<Map<String, dynamic>?> _apqRegister(
-      Map<String, dynamic> variables,
-      String queryString,
-      Map<String, dynamic> extensions) async {
-    _log('_apqRegister POST to $_apiUrl');
-    _log('_apqRegister body query=${queryString.substring(0, queryString.length.clamp(0, 300))}...');
-    _log('_apqRegister body variables=${jsonEncode(variables)}');
-    _log('_apqRegister body extensions=${jsonEncode(extensions)}');
-    try {
-      final postBody = {
-        'query': queryString,
-        'variables': variables,
-        'extensions': extensions,
-      };
-      final postRes = await http.post(
-        Uri.parse(_apiUrl),
-        headers: {
-          ..._apiHeaders,
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode(postBody),
-      );
-      _log('_apqRegister POST status=${postRes.statusCode}');
-      if (postRes.statusCode == 200) {
-        final body = utf8.decode(postRes.bodyBytes);
-        _log('_apqRegister POST body=${body.substring(0, body.length.clamp(0, 500))}');
-        return jsonDecode(body) as Map<String, dynamic>;
-      }
-      _log('_apqRegister POST failed body="${utf8.decode(postRes.bodyBytes)}"');
-    } catch (e) {
-      _log('_apqRegister POST exception: $e');
-    }
-    return null;
-  }
 
-  static AnimeModel _fromEdge(Map<String, dynamic> e) {
-    String? thumb = e['thumbnail'] as String?;
-    if (thumb != null && !thumb.startsWith('http')) {
-      thumb =
-          '$_coverServer/${thumb.replaceFirst(RegExp(r'^/+'), '').replaceFirst(RegExp(r'\d+(?=\.(jpg|png|webp))'), '001')}?w=250';
-    }
-    return AnimeModel(
-        id: e['_id'] ?? '',
-        name: e['englishName'] ?? e['name'] ?? 'Unknown',
-        thumbnail: thumb,
-        isManga: true,
-        sourceId: 'allanime');
-  }}

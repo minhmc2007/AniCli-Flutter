@@ -25,10 +25,9 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:webview_flutter/webview_flutter.dart';
 
 // Global Definitions & App State
-const String kAppVersion = "1.8.9 early access";
+const String kAppVersion = "1.8.9 Open Beta";
 const String kBuildNumber = "189";
 const kColorCream = Color(0xFFFEEAC9);
 const kColorPeach = Color(0xFFFFCDC9);
@@ -133,30 +132,7 @@ class SourceProvider extends ChangeNotifier {
   }
 }
 
-class MangaSourceProvider extends ChangeNotifier {
-  MangaSource _source = MangaSource.allanime;
-  MangaSource get source => _source;
 
-  MangaSourceProvider() { _loadSource(); }
-
-  Future<void> _loadSource() async {
-    final prefs = await SharedPreferences.getInstance();
-    final saved = prefs.getString('manga_source');
-    if (saved != null) {
-      if (saved == 'mangadex') _source = MangaSource.mangadex;
-      else if (saved == 'zettruyen') _source = MangaSource.zettruyen;
-      else _source = MangaSource.allanime;
-      notifyListeners();
-    }
-  }
-
-  Future<void> setSource(MangaSource s) async {
-    _source = s;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('manga_source', s.name);
-    notifyListeners();
-  }
-}
 
 enum PerformanceMode { auto, bestLooking, balanced, bestPerformance }
 enum PerformanceTier { high, mid, low }
@@ -484,9 +460,8 @@ class _CozyHeroImageState extends State<CozyHeroImage> {
   }
 
   Map<String, String>? _getHeaders(String url) {
-    if (url.contains('youtu-chan') || url.contains('fast4speed')) return AllMangaCore.pageHeaders;
-    else if (url.contains('wp.youtube-anime.com') || url.contains('allanime') || url.contains('allmanga')) return AllMangaCore.coverHeaders;
-    else if (url.contains('zetimage.com')) return const {'referer': 'https://www.zettruyen.africa/'};
+    if (url.contains('youtu-chan') || url.contains('fast4speed')) return const {'User-Agent': 'AniCli-Flutter/2.3.0', 'Referer': 'https://allanime.to/'};
+    if (url.contains('zetimage.com')) return const {'referer': 'https://www.zettruyen.africa/'};
     return null;
   }
 
@@ -578,6 +553,11 @@ class SourceSelectScreen extends StatelessWidget { const SourceSelectScreen({sup
 Future<void> _go(BuildContext context, AnimeSource source) async {
   await context.read<SourceProvider>().setSource(source);
   if (context.mounted) context.read<UserProvider>().setMode(source == AnimeSource.hentaivietsub);
+  if (context.mounted) {
+    final mp = context.read<MangaSourceProvider>();
+    if (source == AnimeSource.en) await mp.setSource(MangaSource.en);
+    else if (source == AnimeSource.vi) await mp.setSource(MangaSource.vi);
+  }
   if (context.mounted) Navigator.of(context).pushReplacement(PageRouteBuilder(pageBuilder: (_,__,___) => const MainScreen(), transitionsBuilder: (_, a, __, c) => FadeTransition(opacity: a, child: c), transitionDuration: const Duration(milliseconds: 600)));
 }
 @override Widget build(BuildContext context) => Scaffold(body: Container(decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors:[Color(0xFFFFF8F0), kColorCream])), child: Stack(fit: StackFit.expand, children:[
@@ -631,32 +611,20 @@ class MangaReaderScreen extends StatefulWidget {
 }
 class _MangaReaderScreenState extends State<MangaReaderScreen> {
   bool _isLoading = true, _showControls = true, _isCtrlPressed = false; List<String> _pages =[]; int _pointerCount = 0;
-  bool _useWebView = false;
   final TransformationController _tCtrl = TransformationController(); final ScrollController _sCtrl = ScrollController();
   
   @override void initState() { super.initState(); _loadPages(); }
 
-  String get _mkissaUrl {
-    final cleanChap = widget.chapterNum.contains('|')
-        ? widget.chapterNum.split('|')[1].trim()
-        : widget.chapterNum.trim();
-    return 'https://mkissa.to/manga/${widget.anime.id}/chapter-$cleanChap-sub';
-  }
-  
   Future<void> _loadPages() async {
     setState(() => _isLoading = true);
     final src = widget.anime.sourceId;
     final pages = src == 'zettruyen'
       ? await ZetTruyenCore.getPages(widget.anime.id, widget.chapterNum)
-      : src == 'allanime'
-        ? await AllMangaCore.getPages(widget.anime.id, widget.chapterNum)
-        : await MangaCore.getPages(widget.chapterNum);
-
-    if (pages.isEmpty && src == 'allanime' && mounted) {
-      debugPrint('[MangaReader] AllManga pages empty → switching to WebView: $_mkissaUrl');
-      setState(() { _useWebView = true; _isLoading = false; });
-      return;
-    }
+      : src == 'weebcentral'
+        ? await WeebCentralCore.getPages(widget.anime.id, widget.chapterNum)
+        : src == 'truyenqq'
+          ? await TruyenQQCore.getPages(widget.anime.id, widget.chapterNum)
+          : await MangaCore.getPages(widget.chapterNum);
         
     if (mounted) setState(() { _pages = pages; _isLoading = false; });
   }
@@ -669,7 +637,11 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
   Future<void> _downloadImage(String url, int index) async {
     try {
       final src = widget.anime.sourceId;
-      final headers = src == 'allanime' ? AllMangaCore.pageHeaders : src == 'zettruyen' ? const {'referer': 'https://www.zettruyen.africa/'} : const {"User-Agent": "AniCli/1.0"};
+    final headers = src == 'zettruyen'
+        ? const {'referer': 'https://www.zettruyen.ink/'}
+        : src == 'truyenqq'
+            ? const {'referer': 'https://truyenqq.com.vn/'}
+            : const {'User-Agent': 'AniCli/1.0'};
       final res = await http.get(Uri.parse(url), headers: headers);
       if (res.statusCode == 200) {
         final dir = Platform.isAndroid ? await getExternalStorageDirectory() : await getDownloadsDirectory();
@@ -682,47 +654,13 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
   }
 
   @override Widget build(BuildContext context) {
-    if (_useWebView) {
-      if (Platform.isAndroid || Platform.isIOS) {
-        final controller = WebViewController()
-          ..setJavaScriptMode(JavaScriptMode.unrestricted)
-          ..loadRequest(Uri.parse(_mkissaUrl));
-
-        return Scaffold(
-          backgroundColor: Colors.black,
-          body: SafeArea(
-            child: Column(children: [
-              Container(
-                color: Colors.black.withOpacity(0.85),
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                child: Row(children: [
-                  IconButton(
-                    icon: const Icon(Icons.arrow_back, color: Colors.white),
-                    onPressed: () => Navigator.pop(context),
-                  ),
-                  Expanded(
-                    child: Text('${widget.anime.name} — Ch.${widget.chapterNum.contains("|") ? widget.chapterNum.split("|")[1] : widget.chapterNum}',
-                      style: const TextStyle(color: Colors.white, fontSize: 14),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ]),
-              ),
-              Expanded(child: WebViewWidget(controller: controller)),
-            ]),
-          ),
-        );
-      }
-
-      // Desktop fallback — open in external browser
-      unawaited(launchUrl(Uri.parse(_mkissaUrl), mode: LaunchMode.externalApplication));
-      if (mounted) Navigator.pop(context);
-      return const SizedBox.shrink();
-    }
-
     final idx = widget.allChapters.indexOf(widget.chapterNum);
     final src = widget.anime.sourceId;
-    final headers = src == 'allanime' ? AllMangaCore.pageHeaders : src == 'zettruyen' ? const {'referer': 'https://www.zettruyen.africa/'} : const {"User-Agent": "AniCli/1.0"};
+    final headers = src == 'zettruyen'
+        ? const {'referer': 'https://www.zettruyen.ink/'}
+        : src == 'truyenqq'
+            ? const {'referer': 'https://truyenqq.com.vn/'}
+            : const {'User-Agent': 'AniCli/1.0'};
 
     return Scaffold(backgroundColor: Colors.black, body: KeyboardListener(focusNode: FocusNode()..requestFocus(), onKeyEvent: (e) { if (e.logicalKey == LogicalKeyboardKey.controlLeft || e.logicalKey == LogicalKeyboardKey.controlRight) setState(() => _isCtrlPressed = e is KeyDownEvent || e is KeyRepeatEvent); }, child: Stack(children:[
       Listener(
@@ -912,15 +850,23 @@ class _BrowseViewState extends State<BrowseView> with AutomaticKeepAliveClientMi
 
     List<AnimeModel> res =[];
     if (_isMangaMode) {
+      debugPrint('[MangaBrowse] mangaSrc=$mangaSrc query="${_query}"');
       if (_query.isEmpty) {
-        if (mangaSrc == MangaSource.zettruyen) res = await ZetTruyenCore.getTrending();
-        else if (mangaSrc == MangaSource.allanime) res = await AllMangaCore.getTrending();
-        else res = await MangaCore.getTrending();
+        if (mangaSrc == MangaSource.zettruyen) { res = await ZetTruyenCore.getTrending(); }
+        else if (mangaSrc == MangaSource.weebcentral) { res = await WeebCentralCore.getTrending(); }
+        else if (mangaSrc == MangaSource.truyenqq) { res = await TruyenQQCore.getTrending(); }
+        else if (mangaSrc == MangaSource.en) { res = await EnMangaCore.getTrending(); }
+        else if (mangaSrc == MangaSource.vi) { res = await ViMangaCore.getTrending(); }
+        else { res = await MangaCore.getTrending(); }
       } else {
-        if (mangaSrc == MangaSource.zettruyen) res = await ZetTruyenCore.search(_query);
-        else if (mangaSrc == MangaSource.allanime) res = await AllMangaCore.search(_query);
-        else res = await MangaCore.search(_query);
+        if (mangaSrc == MangaSource.zettruyen) { res = await ZetTruyenCore.search(_query); }
+        else if (mangaSrc == MangaSource.weebcentral) { res = await WeebCentralCore.search(_query); }
+        else if (mangaSrc == MangaSource.truyenqq) { res = await TruyenQQCore.search(_query); }
+        else if (mangaSrc == MangaSource.en) { res = await EnMangaCore.search(_query); }
+        else if (mangaSrc == MangaSource.vi) { res = await ViMangaCore.search(_query); }
+        else { res = await MangaCore.search(_query); }
       }
+      debugPrint('[MangaBrowse] got ${res.length} results');
     } else if (useProvider) {
       try {
         res = await ProviderCoordinator.searchAsAnimeModel(_query, 'sub');
@@ -1023,11 +969,11 @@ class _BrowseViewState extends State<BrowseView> with AutomaticKeepAliveClientMi
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     children:[
                                       Text(
-                                        mangaSrc == MangaSource.mangadex ? "MangaDex" : mangaSrc == MangaSource.zettruyen ? "ZetTruyen" : "AllManga",
+                                        mangaSrc == MangaSource.mangadex ? "MangaDex" : mangaSrc == MangaSource.zettruyen ? "ZetTruyen" : mangaSrc == MangaSource.truyenqq ? "TruyenQQ" : mangaSrc == MangaSource.en ? "EN Manga" : mangaSrc == MangaSource.vi ? "VN Manga" : "WeebCentral",
                                         style: GoogleFonts.outfit(fontSize: 40, fontWeight: FontWeight.bold, color: kColorDarkText),
                                       ),
                                       Text(
-                                        mangaSrc == MangaSource.mangadex ? "Read the world's library" : mangaSrc == MangaSource.zettruyen ? "Truyện tranh Tiếng Việt" : "The best manga reader",
+                                        mangaSrc == MangaSource.mangadex ? "Read the world's library" : mangaSrc == MangaSource.zettruyen ? "Truyện tranh Tiếng Việt" : mangaSrc == MangaSource.truyenqq ? "Truyện tranh Việt Nam" : mangaSrc == MangaSource.en ? "English Manga" : mangaSrc == MangaSource.vi ? "Vietnamese Manga" : "The Weeb Central",
                                         style: GoogleFonts.inter(fontSize: 16, color: kColorDarkText.withOpacity(0.6)),
                                       ),
                                     ],
@@ -1255,9 +1201,12 @@ class _SettingsViewState extends State<SettingsView> {
                 dropdownColor: kColorCream,
                 underline: Container(height: 1, color: kColorCoral),
                 items: const[
-                  DropdownMenuItem(value: MangaSource.allanime, child: Text("AllManga (allanime.day · Default)")),
+                  DropdownMenuItem(value: MangaSource.en, child: Text("EN Manga (MangaDex + WeebCentral)")),
+                  DropdownMenuItem(value: MangaSource.vi, child: Text("VN Manga (ZetTruyen + TruyenQQ)")),
                   DropdownMenuItem(value: MangaSource.mangadex, child: Text("MangaDex (Multi-lang · R18)")),
                   DropdownMenuItem(value: MangaSource.zettruyen, child: Text("ZetTruyen (Tiếng Việt)")),
+                  DropdownMenuItem(value: MangaSource.weebcentral, child: Text("WeebCentral (English)")),
+                  DropdownMenuItem(value: MangaSource.truyenqq, child: Text("TruyenQQ (Tiếng Việt)")),
                 ],
                 onChanged: (v) { if (v != null) mp.setSource(v); }
               )
@@ -1413,7 +1362,8 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
     List<dynamic> items =[];
     if (widget.anime.isManga) {
       if (src == 'zettruyen') items = await ZetTruyenCore.getChapters(widget.anime.id);
-      else if (src == 'allanime') items = await AllMangaCore.getChapters(widget.anime.id);
+      else if (src == 'weebcentral') items = await WeebCentralCore.getChapters(widget.anime.id);
+      else if (src == 'truyenqq') items = await TruyenQQCore.getChapters(widget.anime.id);
       else items = await MangaCore.getChapters(widget.anime.id);
     } else if (isProvider) {
       try {
