@@ -15,7 +15,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
-import 'package:lucide_icons/lucide_icons.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:animeclient/api/providers/hls_proxy.dart';
@@ -1282,7 +1282,7 @@ class _SettingsViewState extends State<SettingsView> {
         const SizedBox(height: 15)
       ],
       _sec("Development"),
-      _cd(LucideIcons.github, "GitHub Repository", "minhmc2007/AniCli-Flutter", tr: const Icon(LucideIcons.externalLink, size: 16, color: kColorCoral), onTap: () => _url("https://github.com/minhmc2007/AniCli-Flutter")),
+      _cd(LucideIcons.code2, "GitHub Repository", "minhmc2007/AniCli-Flutter", tr: const Icon(LucideIcons.externalLink, size: 16, color: kColorCoral), onTap: () => _url("https://github.com/minhmc2007/AniCli-Flutter")),
       const SizedBox(height: 10),
       _cd(LucideIcons.rotateCcw, "Reset Welcome Screen", "Reset OOBE flag for testing", onTap: () async {
         await (await SharedPreferences.getInstance()).remove('is_first_launch');
