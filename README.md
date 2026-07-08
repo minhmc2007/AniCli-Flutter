@@ -3,52 +3,30 @@
   <img src="banner.png" alt="Ani-Cli Flutter Banner">
 </p>
 
-# 🌸 Ani-Cli Flutter [EOL]
+# 🌸 Ani-Cli Flutter
 
-![Status](https://img.shields.io/badge/Status-End--of--Life-red?style=for-the-badge)
+![Status](https://img.shields.io/badge/Status-Active-brightgreen?style=for-the-badge)
 ![License](https://img.shields.io/badge/License-GPLv3-blue.svg?style=for-the-badge)
 ![Flutter](https://img.shields.io/badge/Flutter-%2302569B.svg?style=for-the-badge&logo=Flutter&logoColor=white)
 
 > **The Cozy Anime & Manga Client.**
-> A beautiful, animated Flutter port of the [ani-cli](https://github.com/pystardust/ani-cli) shell script.
+> A beautiful, animated Flutter port of the [ani-cli](https://github.com/pystardust/ani-cli) shell script with multi-source support for English and Vietnamese content.
 
 ---
 
-## 🛑 Project Status: End of Life (EOL)
-
-**This project is no longer maintained.** 
-
-This project has traveled far beyond my original expectations. What began as a simple Flutter port of a shell script evolved into a well-designed, "otaku/wibu hub" supporting English and Vietnamese content, Manga, and AO content. 
-
-However, due to breaking changes in backend provider logic and technical limitations (specifically SSL/BoringSSL issues on Android/Flutter), many features are now broken. 
-
-### 📝 Final Words from the Developer:
-> "This project is far from my expectations—from a simple app to watch anime to a nice-looking, well-designed 'otaku/wibu hub.' It has ENG/VI manga/anime and even AO content support, but now, everything is breaking. I would like to thank everyone who downloaded and used this app." — **minhmc2007**
-
-**Feel free to fork and modify the code, but please respect the license. It exists for a reason.**
-
----
-
-## ✨ Features (Legacy)
+## ✨ Features
 
 *   **🎨 Cozy UI**: A relaxing, pastel-themed interface with live moving gradients and milky glassmorphism.
-*   **📖 Manga Reader**: Integrated **MangaDex** (Global) and **ZetTruyen** (Vietnamese) support.
-*   **🎞️ Flexible Player**: Support for internal playback and system-level MPV.
-*   **🔍 Multi-Source**: Scrapers for `AllAnime` (EN), `PhimAPI` (VI), and `ZetTruyen`.
+*   **📖 Multi-Source Manga**: Aggregators for EN (MangaDex + WeebCentral) and VN (ZetTruyen + TruyenQQ), plus individual source selection.
+*   **🎞️ Multi-Source Anime**: English (Multi-Provider via AllAnime/Senshi/Anipub/etc.) and Vietnamese (PhimAPI) backends.
+*   **🔍 Smart Deduplication**: Aggregators merge results from multiple sources by normalized title, preferring the more reliable source.
+*   **🔄 Manga Reader**: Dedicated reader with per-source referer headers, image caching, download support.
 *   **✨ Animations**: Smooth Hero transitions and hover effects using `flutter_animate`.
+*   **🌐 Cross-Platform**: Windows, Linux, macOS, Android, iOS.
 
 ---
 
-## ⚠️ Known Issues
-
-*   **SSL/Networking:** The `AllAnime` (EN) source requires **OpenSSL** (tested on Linux/CachyOS). On Android/Mobile, `BoringSSL` limitations often cause network faults.
-*   **Broken Streams:** Several backend scrapers have updated their security/logic, causing video stream failures in the current build.
-
----
-
-## 🛠️ Installation (For Developers/Forking)
-
-If you wish to attempt to fix the scrapers or study the UI logic:
+## 🛠️ Installation
 
 ```bash
 # Clone
@@ -66,20 +44,23 @@ flutter run
 
 ## 🏗️ Architecture
 
-*   **`lib/api/ani_core.dart`**: Port of Bash script logic and AllAnime GraphQL queries.
-*   **`lib/api/manga_core.dart`**: Communication with MangaDex and ZetTruyen APIs.
-*   **`lib/user_provider.dart`**: State Management for History and Favorites.
-*   **`lib/main.dart`**: The "Cozy" UI layer, LiveGradientBackground, and GlassDock.
+*   **`lib/main.dart`**: App shell, navigation, OOBE onboarding, settings, and all UI components (cards, reader, detail views).
+*   **`lib/api/manga.dart`**: All manga cores — `MangaCore` (MangaDex), `ZetTruyenCore`, `WeebCentralCore`, `TruyenQQCore`, plus `EnMangaCore` and `ViMangaCore` aggregators.
+*   **`lib/api/anime.dart`**: Anime source definitions and core coordination.
+*   **`lib/api/providers/`**: Provider-based anime sources (AllAnime, Senshi, Anipub, AniNeko, AnimePahe).
+*   **`lib/user_provider.dart`**: State management for history and favorites.
 
 ---
 
 ## 🙏 Credits
 
-This project was built upon the hard work of many providers and developers:
+This project builds upon the work of many open-source projects and providers:
 
 *   **Original Logic**: [ani-cli](https://github.com/pystardust/ani-cli) by pystardust.
+*   **Manga Implementation**: [manga-tui](https://github.com/josueBarretogit/manga-tui) by josueBarretogit.
+*   **Anime Implementation**: [curd](https://github.com/Wraient/curd) by Wraient.
 *   **Anime Scrapers**: [Sudachi](https://github.com/KabosuNeko/Sudachi) / PhimAPI.
-*   **Manga Sources**: [MangaDex](https://mangadex.org) and [ZetTruyen](https://www.zettruyen.africa).
+*   **Manga Sources**: [MangaDex](https://mangadex.org), [ZetTruyen](https://www.zettruyen.ink), [WeebCentral](https://weebcentral.com), [TruyenQQ](https://truyenqq.com.vn).
 *   **NSFW/AO Content**: [HentaiVietsub](https://hentaivietsub.com).
 *   **UI/Framework**: [Flutter](https://flutter.dev).
 
