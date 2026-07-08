@@ -1,7 +1,14 @@
 import 'dart:convert';
+import 'package:crypto/crypto.dart' show sha256;
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+
+// Debug logging toggle — set to true to see AllManga API flow
+bool _mangaDebug = true;
+void _log(String msg) {
+  if (_mangaDebug) debugPrint('[AllMangaCore] $msg');
+}
 
 // ════════════════════════════════════════════════════════════════════════════
 // SHARED MODEL
@@ -355,7 +362,9 @@ class MangaCore {
         sb.write('&contentRating[]=$r');
       }
       if (langs != null) {
-        for (final l in langs) sb.write('&translatedLanguage[]=$l');
+        for (final l in langs) {
+          sb.write('&translatedLanguage[]=$l');
+        }
       }
       try {
         final res =
@@ -418,15 +427,15 @@ class MangaCore {
 
 class AllMangaCore {
   static const String _apiUrl = 'https://api.allanime.day/api';
-  static const String _imageServer = 'https://ytimgf.fast4speed.rsvp';
   static const String _coverServer =
       'https://wp.youtube-anime.com/aln.youtube-anime.com';
   static const String _searchHash =
       '2d48e19fb67ddcac42fbb885204b6abb0a84f406f15ef83f36de4a66f49f651a';
   static const String _detailHash =
       'd77781dcf964b97aea0be621dbde430e89e200b58526823ee6010dd11c3ca96a';
-  static const String _pagesHash =
-      'a062f1b131dae3d17c1950fad14640d066b988ac10347ed49cfbe70f5e7f661b';
+
+  static const String _chapterQuery =
+      r'query($mangaId:String!,$translationType:VaildTranslationTypeMangaEnumType!,$chapterString:String!,$search:SearchInput){chapter(mangaId:$mangaId,translationType:$translationType,chapterString:$chapterString,search:$search){_id pictureUrls pictureUrlHead}}';
 
   static const Map<String, String> _apiHeaders = {
     'accept': '*/*',
@@ -458,10 +467,13 @@ class AllMangaCore {
       'countryOrigin': 'ALL'
     };
     try {
+      _log('search query="$query"');
       final data = await _persistedGet(variables, _searchHash);
       final List edges = data['data']?['mangas']?['edges'] ?? [];
+      _log('search returned ${edges.length} results');
       return edges.map((e) => _fromEdge(e)).toList();
     } catch (e) {
+      _log('search error: $e');
       return [];
     }
   }
@@ -470,6 +482,7 @@ class AllMangaCore {
 
   static Future<List<String>> getChapters(String mangaId) async {
     try {
+      _log('getChapters mangaId=$mangaId');
       final data = await _persistedGet(
           {
             '_id': mangaId,
@@ -477,62 +490,78 @@ class AllMangaCore {
           },
           _detailHash);
       final detail = data['data']?['manga']?['availableChaptersDetail'];
-      if (detail == null) return [];
+      if (detail == null) {
+        _log('getChapters availableChaptersDetail is null');
+        return [];
+      }
+      _log('getChapters detail keys=${(detail as Map).keys.join(", ")}');
       final List raw =
           (detail['sub'] ?? detail['raw'] ?? detail['dub'] ?? []) as List;
+      _log('getChapters raw has ${raw.length} chapters');
       final List<String> strList = raw.map((c) => c.toString()).toList();
       strList.sort((a, b) {
         double nA = double.tryParse(a) ?? 0;
         double nB = double.tryParse(b) ?? 0;
         return nB.compareTo(nA);
       });
+      _log('getChapters returning ${strList.length} chapters: ${strList.take(5).join(", ")}');
       return strList;
     } catch (e) {
+      _log('getChapters error: $e');
       return [];
     }
   }
 
   static Future<List<String>> getPages(
       String mangaId, String chapterString) async {
-    final allUrls = <String>[];
-    int offset = 0;
+    _log('getPages mangaId=$mangaId chapterString=$chapterString');
     final cleanChapter = chapterString.contains('|')
         ? chapterString.split('|')[1].trim()
         : chapterString.trim();
-    while (true) {
-      try {
-        final data = await _persistedGet(
-            {
-              'mangaId': mangaId,
-              'translationType': 'sub',
-              'chapterString': cleanChapter,
-              'limit': 50,
-              'offset': offset
-            },
-            _pagesHash);
-        final allStrings = _extractAllStrings(data);
-        final found = allStrings
-            .where((s) =>
-                s.contains(mangaId) &&
-                s.contains('/') &&
-                !s.contains('mcovers'))
-            .toList();
-        if (found.isEmpty) break;
-        bool newAdded = false;
-        for (final s in found) {
-          String url = s.startsWith('http')
-              ? s
-              : '$_imageServer${s.startsWith('/') ? s : '/$s'}';
-          if (!allUrls.contains(url)) {
-            allUrls.add(url);
-            newAdded = true;
-          }
-        }
-        if (!newAdded) break;
-        offset += 50;
-      } catch (e) {
-        break;
+    _log('getPages cleanChapter=$cleanChapter');
+
+    _log('getPages calling _apqGet with translationType=sub');
+    final data = await _apqGet({
+      'mangaId': mangaId,
+      'translationType': 'sub',
+      'chapterString': cleanChapter,
+      'search': {'allowAdult': true, 'allowUnknown': true},
+    }, _chapterQuery);
+
+    if (data == null) {
+      _log('getPages _apqGet returned null — all paths failed');
+      return [];
+    }
+    _log('getPages _apqGet returned ${jsonEncode(data).length} chars');
+
+    final chapter = data['data']?['chapter'] as Map<String, dynamic>?;
+    if (chapter == null) {
+      _log('getPages data.data.chapter is null — response=${jsonEncode(data).substring(0, (jsonEncode(data).length).clamp(0, 500))}');
+      return [];
+    }
+    _log('getPages chapter keys=${chapter.keys.join(", ")}');
+
+    final pictureUrlHead = chapter['pictureUrlHead'] as String? ?? '';
+    final pictureUrls = chapter['pictureUrls'] as List? ?? [];
+    _log('getPages pictureUrlHead="$pictureUrlHead" pictureUrls.length=${pictureUrls.length}');
+    if (pictureUrls.isNotEmpty) {
+      _log('getPages first 3 pictureUrls=${pictureUrls.take(3).join(", ")}');
+    }
+
+    final allUrls = <String>[];
+    for (final url in pictureUrls) {
+      final urlStr = url.toString();
+      if (urlStr.isEmpty) continue;
+      final fullUrl = urlStr.startsWith('http')
+          ? urlStr
+          : '$pictureUrlHead$urlStr';
+      if (!allUrls.contains(fullUrl)) {
+        allUrls.add(fullUrl);
       }
+    }
+    _log('getPages returning ${allUrls.length} URLs');
+    if (allUrls.isNotEmpty) {
+      _log('getPages first URL=${allUrls.first}');
     }
     return allUrls;
   }
@@ -546,9 +575,102 @@ class AllMangaCore {
       'variables': jsonEncode(variables),
       'extensions': jsonEncode(extensions)
     });
+    _log('_persistedGet GET $uri');
+    _log('_persistedGet variables=${jsonEncode(variables)}');
     final res = await http.get(uri, headers: _apiHeaders);
-    if (res.statusCode == 200) return jsonDecode(utf8.decode(res.bodyBytes));
+    _log('_persistedGet status=${res.statusCode}');
+    if (res.statusCode == 200) {
+      final body = utf8.decode(res.bodyBytes);
+      _log('_persistedGet body=${body.substring(0, body.length.clamp(0, 800))}');
+      return jsonDecode(body);
+    }
+    _log('_persistedGet FAILED status=${res.statusCode} body=${utf8.decode(res.bodyBytes)}');
     throw Exception('API Error');
+  }
+
+  static String _sha256hex(String input) =>
+      sha256.convert(utf8.encode(input)).toString();
+
+  static Future<Map<String, dynamic>?> _apqGet(
+      Map<String, dynamic> variables, String queryString) async {
+    final hash = _sha256hex(queryString);
+    _log('_apqGet queryHash=$hash');
+    _log('_apqGet queryString=$queryString');
+    _log('_apqGet variables=${jsonEncode(variables)}');
+    final extensions = {
+      'persistedQuery': {'version': 1, 'sha256Hash': hash}
+    };
+
+    final uri = Uri.parse(_apiUrl).replace(queryParameters: {
+      'variables': jsonEncode(variables),
+      'extensions': jsonEncode(extensions)
+    });
+    _log('_apqGet GET $uri');
+
+    try {
+      final getRes = await http.get(uri, headers: _apiHeaders);
+      _log('_apqGet GET status=${getRes.statusCode}');
+      if (getRes.statusCode == 200) {
+        final body = utf8.decode(getRes.bodyBytes);
+        _log('_apqGet GET body=${body.substring(0, body.length.clamp(0, 800))}');
+        final data = jsonDecode(body) as Map<String, dynamic>;
+        final errors = data['errors'] as List?;
+        if (errors != null) {
+          _log('_apqGet GET returned errors=${jsonEncode(errors)}');
+          for (final err in errors) {
+            final ext = err['extensions'] as Map?;
+            if (ext != null &&
+                ext['code'] == 'PERSISTED_QUERY_NOT_FOUND') {
+              _log('_apqGot PERSISTED_QUERY_NOT_FOUND → falling back to POST register');
+              return await _apqRegister(variables, queryString, extensions);
+            }
+          }
+          return data;
+        }
+        _log('_apqGet GET succeeded with data');
+        return data;
+      }
+      _log('_apqGet GET non-200 — falling back to POST register');
+    } catch (e) {
+      _log('_apqGet GET exception: $e — falling back to POST register');
+    }
+
+    return await _apqRegister(variables, queryString, extensions);
+  }
+
+  static Future<Map<String, dynamic>?> _apqRegister(
+      Map<String, dynamic> variables,
+      String queryString,
+      Map<String, dynamic> extensions) async {
+    _log('_apqRegister POST to $_apiUrl');
+    _log('_apqRegister body query=${queryString.substring(0, queryString.length.clamp(0, 300))}...');
+    _log('_apqRegister body variables=${jsonEncode(variables)}');
+    _log('_apqRegister body extensions=${jsonEncode(extensions)}');
+    try {
+      final postBody = {
+        'query': queryString,
+        'variables': variables,
+        'extensions': extensions,
+      };
+      final postRes = await http.post(
+        Uri.parse(_apiUrl),
+        headers: {
+          ..._apiHeaders,
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode(postBody),
+      );
+      _log('_apqRegister POST status=${postRes.statusCode}');
+      if (postRes.statusCode == 200) {
+        final body = utf8.decode(postRes.bodyBytes);
+        _log('_apqRegister POST body=${body.substring(0, body.length.clamp(0, 500))}');
+        return jsonDecode(body) as Map<String, dynamic>;
+      }
+      _log('_apqRegister POST failed body="${utf8.decode(postRes.bodyBytes)}"');
+    } catch (e) {
+      _log('_apqRegister POST exception: $e');
+    }
+    return null;
   }
 
   static AnimeModel _fromEdge(Map<String, dynamic> e) {
@@ -563,19 +685,4 @@ class AllMangaCore {
         thumbnail: thumb,
         isManga: true,
         sourceId: 'allanime');
-  }
-
-  static List<String> _extractAllStrings(dynamic data) {
-    final strings = <String>[];
-    if (data is Map) {
-      data.forEach((key, value) => strings.addAll(_extractAllStrings(value)));
-    } else if (data is List) {
-      for (var item in data) {
-        strings.addAll(_extractAllStrings(item));
-      }
-    } else if (data is String) {
-      strings.add(data);
-    }
-    return strings;
-  }
-}
+  }}

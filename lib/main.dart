@@ -25,10 +25,11 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 
 // Global Definitions & App State
-const String kAppVersion = "1.8.8";
-const String kBuildNumber = "188";
+const String kAppVersion = "1.8.9 early access";
+const String kBuildNumber = "189";
 const kColorCream = Color(0xFFFEEAC9);
 const kColorPeach = Color(0xFFFFCDC9);
 const kColorSoftPink = Color(0xFFFDACAC);
@@ -630,9 +631,17 @@ class MangaReaderScreen extends StatefulWidget {
 }
 class _MangaReaderScreenState extends State<MangaReaderScreen> {
   bool _isLoading = true, _showControls = true, _isCtrlPressed = false; List<String> _pages =[]; int _pointerCount = 0;
+  bool _useWebView = false;
   final TransformationController _tCtrl = TransformationController(); final ScrollController _sCtrl = ScrollController();
   
   @override void initState() { super.initState(); _loadPages(); }
+
+  String get _mkissaUrl {
+    final cleanChap = widget.chapterNum.contains('|')
+        ? widget.chapterNum.split('|')[1].trim()
+        : widget.chapterNum.trim();
+    return 'https://mkissa.to/manga/${widget.anime.id}/chapter-$cleanChap-sub';
+  }
   
   Future<void> _loadPages() async {
     setState(() => _isLoading = true);
@@ -642,6 +651,12 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
       : src == 'allanime'
         ? await AllMangaCore.getPages(widget.anime.id, widget.chapterNum)
         : await MangaCore.getPages(widget.chapterNum);
+
+    if (pages.isEmpty && src == 'allanime' && mounted) {
+      debugPrint('[MangaReader] AllManga pages empty → switching to WebView: $_mkissaUrl');
+      setState(() { _useWebView = true; _isLoading = false; });
+      return;
+    }
         
     if (mounted) setState(() { _pages = pages; _isLoading = false; });
   }
@@ -667,6 +682,44 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
   }
 
   @override Widget build(BuildContext context) {
+    if (_useWebView) {
+      if (Platform.isAndroid || Platform.isIOS) {
+        final controller = WebViewController()
+          ..setJavaScriptMode(JavaScriptMode.unrestricted)
+          ..loadRequest(Uri.parse(_mkissaUrl));
+
+        return Scaffold(
+          backgroundColor: Colors.black,
+          body: SafeArea(
+            child: Column(children: [
+              Container(
+                color: Colors.black.withOpacity(0.85),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                child: Row(children: [
+                  IconButton(
+                    icon: const Icon(Icons.arrow_back, color: Colors.white),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                  Expanded(
+                    child: Text('${widget.anime.name} — Ch.${widget.chapterNum.contains("|") ? widget.chapterNum.split("|")[1] : widget.chapterNum}',
+                      style: const TextStyle(color: Colors.white, fontSize: 14),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ]),
+              ),
+              Expanded(child: WebViewWidget(controller: controller)),
+            ]),
+          ),
+        );
+      }
+
+      // Desktop fallback — open in external browser
+      unawaited(launchUrl(Uri.parse(_mkissaUrl), mode: LaunchMode.externalApplication));
+      if (mounted) Navigator.pop(context);
+      return const SizedBox.shrink();
+    }
+
     final idx = widget.allChapters.indexOf(widget.chapterNum);
     final src = widget.anime.sourceId;
     final headers = src == 'allanime' ? AllMangaCore.pageHeaders : src == 'zettruyen' ? const {'referer': 'https://www.zettruyen.africa/'} : const {"User-Agent": "AniCli/1.0"};
