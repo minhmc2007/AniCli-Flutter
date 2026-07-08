@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -917,4 +918,24 @@ class TruyenQQCore {
   }
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// THUMBNAIL CACHE
+// ════════════════════════════════════════════════════════════════════════════
+
+Future<void> precacheThumbnails(List<AnimeModel> items) async {
+  final mgr = DefaultCacheManager();
+  for (final item in items) {
+    final url = item.fullImageUrl;
+    if (!url.startsWith('http')) continue;
+    try {
+      Map<String, String>? headers;
+      if (url.contains('zetimage.com')) {
+        headers = {'referer': 'https://www.zettruyen.ink/'};
+      } else if (url.contains('static3t.com')) {
+        headers = {'referer': 'https://truyenqq.com.vn/'};
+      }
+      await mgr.getSingleFile(url, headers: headers);
+    } catch (_) {}
+  }
+}
 

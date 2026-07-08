@@ -879,6 +879,7 @@ class _BrowseViewState extends State<BrowseView> with AutomaticKeepAliveClientMi
       : (useVi ? await ViAnimeCore.search(_query, page: _page) : (isNSFW ? await HentaiVietsubCore.search(_query, page: _page) : await AniCore.search(_query, page: _page)));
     }
 
+    unawaited(precacheThumbnails(res));
     if (mounted) setState(() { _items = res; _isLoading = false; });
   }
 
