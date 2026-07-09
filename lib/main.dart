@@ -437,9 +437,8 @@ class LiquidGlassContainer extends StatelessWidget {
     if (tier == PerformanceTier.low) {
       return Container(decoration: BoxDecoration(color: Colors.white.withOpacity(0.9), borderRadius: br, border: border ?? Border.all(color: Colors.black12, width: 1)), child: child);
     }
-    final b = tier == PerformanceTier.high ? (blur * 0.65).clamp(6.0, blur) : (blur * 0.35).clamp(3.0, 8.0);
-    final o = tier == PerformanceTier.high ? opacity : opacity * 0.7;
-    return ClipRRect(borderRadius: br, child: BackdropFilter(filter: ImageFilter.blur(sigmaX: b, sigmaY: b), child: Container(decoration: BoxDecoration(color: Colors.white.withOpacity(o), borderRadius: br, border: border ?? Border.all(color: Colors.white.withOpacity(tier == PerformanceTier.high ? 0.6 : 0.3), width: 1.5), gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors:[Colors.white.withOpacity(tier == PerformanceTier.high ? 0.6 : 0.3), Colors.white.withOpacity(tier == PerformanceTier.high ? 0.1 : 0.05)])), child: child)));
+    final o = tier == PerformanceTier.high ? opacity : opacity * 0.65;
+    return Container(decoration: BoxDecoration(color: Colors.white.withOpacity(o), borderRadius: br, border: border ?? Border.all(color: Colors.white.withOpacity(tier == PerformanceTier.high ? 0.5 : 0.3), width: 1.5), gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors:[Colors.white.withOpacity(tier == PerformanceTier.high ? 0.5 : 0.25), Colors.white.withOpacity(tier == PerformanceTier.high ? 0.08 : 0.04)])), child: child);
   }
 }
 
