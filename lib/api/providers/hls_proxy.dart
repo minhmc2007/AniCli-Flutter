@@ -12,7 +12,8 @@ class HlsProxy {
 
   static Future<void> start() async {
     if (_server != null) return;
-    _client = HttpClient();
+    _client = HttpClient()
+      ..badCertificateCallback = (cert, host, port) => true;
     _server = await HttpServer.bind('127.0.0.1', 0);
     _port = _server!.port;
     _server!.listen(_onRequest);
