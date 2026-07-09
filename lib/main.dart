@@ -429,8 +429,8 @@ class _GenericDownloadDialogState extends State<GenericDownloadDialog> {
 
 // Shared Views & Animations
 class LiquidGlassContainer extends StatelessWidget {
-  final Widget child; final double blur, opacity; final BorderRadius? borderRadius; final Border? border;
-  const LiquidGlassContainer({super.key, required this.child, this.blur=15, this.opacity=0.4, this.borderRadius, this.border});
+  final Widget child; final double blur, opacity; final BorderRadius? borderRadius; final Border? border; final bool useBlur;
+  const LiquidGlassContainer({super.key, required this.child, this.blur=15, this.opacity=0.4, this.borderRadius, this.border, this.useBlur=false});
   @override Widget build(BuildContext context) {
     final br = borderRadius ?? BorderRadius.circular(20);
     final tier = context.select<SettingsProvider, PerformanceTier>((p) => p.tier);
@@ -438,7 +438,12 @@ class LiquidGlassContainer extends StatelessWidget {
       return Container(decoration: BoxDecoration(color: Colors.white.withOpacity(0.9), borderRadius: br, border: border ?? Border.all(color: Colors.black12, width: 1)), child: child);
     }
     final o = tier == PerformanceTier.high ? opacity : opacity * 0.65;
-    return Container(decoration: BoxDecoration(color: Colors.white.withOpacity(o), borderRadius: br, border: border ?? Border.all(color: Colors.white.withOpacity(tier == PerformanceTier.high ? 0.5 : 0.3), width: 1.5), gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors:[Colors.white.withOpacity(tier == PerformanceTier.high ? 0.5 : 0.25), Colors.white.withOpacity(tier == PerformanceTier.high ? 0.08 : 0.04)])), child: child);
+    final body = Container(decoration: BoxDecoration(color: Colors.white.withOpacity(o), borderRadius: br, border: border ?? Border.all(color: Colors.white.withOpacity(tier == PerformanceTier.high ? 0.5 : 0.3), width: 1.5), gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors:[Colors.white.withOpacity(tier == PerformanceTier.high ? 0.5 : 0.25), Colors.white.withOpacity(tier == PerformanceTier.high ? 0.08 : 0.04)])), child: child);
+    if (useBlur && tier == PerformanceTier.high) {
+      final b = (blur * 0.25).clamp(2.0, 6.0);
+      return ClipRRect(borderRadius: br, child: BackdropFilter(filter: ImageFilter.blur(sigmaX: b, sigmaY: b), child: body));
+    }
+    return body;
   }
 }
 
@@ -1603,6 +1608,6 @@ class GlassDock extends StatelessWidget {
   final int selectedIndex; final Function(int) onItemSelected; const GlassDock({super.key, required this.selectedIndex, required this.onItemSelected});
   @override Widget build(BuildContext context) {
     final isMobile = MediaQuery.of(context).size.width < 900; final items =[(LucideIcons.search, "Browse"), (LucideIcons.history, "History"), (LucideIcons.heart, "Favorites"), (LucideIcons.settings, "Settings")];
-    return LiquidGlassContainer(borderRadius: BorderRadius.circular(30), child: Padding(padding: EdgeInsets.symmetric(horizontal: isMobile ? 10 : 20, vertical: 12), child: Row(mainAxisSize: MainAxisSize.min, children: List.generate(items.length, (i) => Padding(padding: const EdgeInsets.symmetric(horizontal: 8), child: IconButton(icon: Icon(items[i].$1, color: selectedIndex == i ? kColorCoral : Colors.black38, size: isMobile ? 20 : 24), onPressed: () => onItemSelected(i), tooltip: items[i].$2))))));
+    return LiquidGlassContainer(borderRadius: BorderRadius.circular(30), useBlur: true, child: Padding(padding: EdgeInsets.symmetric(horizontal: isMobile ? 10 : 20, vertical: 12), child: Row(mainAxisSize: MainAxisSize.min, children: List.generate(items.length, (i) => Padding(padding: const EdgeInsets.symmetric(horizontal: 8), child: IconButton(icon: Icon(items[i].$1, color: selectedIndex == i ? kColorCoral : Colors.black38, size: isMobile ? 20 : 24), onPressed: () => onItemSelected(i), tooltip: items[i].$2))))));
   }
 }
