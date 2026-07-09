@@ -433,9 +433,13 @@ class LiquidGlassContainer extends StatelessWidget {
   const LiquidGlassContainer({super.key, required this.child, this.blur=15, this.opacity=0.4, this.borderRadius, this.border});
   @override Widget build(BuildContext context) {
     final br = borderRadius ?? BorderRadius.circular(20);
-    return context.select<SettingsProvider, PerformanceTier>((p) => p.tier) == PerformanceTier.low
-    ? Container(decoration: BoxDecoration(color: Colors.white.withOpacity(0.9), borderRadius: br, border: border ?? Border.all(color: Colors.black12, width: 1)), child: child)
-    : ClipRRect(borderRadius: br, child: BackdropFilter(filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur), child: Container(decoration: BoxDecoration(color: Colors.white.withOpacity(opacity), borderRadius: br, border: border ?? Border.all(color: Colors.white.withOpacity(0.6), width: 1.5), gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors:[Colors.white.withOpacity(0.6), Colors.white.withOpacity(0.1)])), child: child)));
+    final tier = context.select<SettingsProvider, PerformanceTier>((p) => p.tier);
+    if (tier == PerformanceTier.low) {
+      return Container(decoration: BoxDecoration(color: Colors.white.withOpacity(0.9), borderRadius: br, border: border ?? Border.all(color: Colors.black12, width: 1)), child: child);
+    }
+    final b = tier == PerformanceTier.high ? (blur * 0.65).clamp(6.0, blur) : (blur * 0.35).clamp(3.0, 8.0);
+    final o = tier == PerformanceTier.high ? opacity : opacity * 0.7;
+    return ClipRRect(borderRadius: br, child: BackdropFilter(filter: ImageFilter.blur(sigmaX: b, sigmaY: b), child: Container(decoration: BoxDecoration(color: Colors.white.withOpacity(o), borderRadius: br, border: border ?? Border.all(color: Colors.white.withOpacity(tier == PerformanceTier.high ? 0.6 : 0.3), width: 1.5), gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors:[Colors.white.withOpacity(tier == PerformanceTier.high ? 0.6 : 0.3), Colors.white.withOpacity(tier == PerformanceTier.high ? 0.1 : 0.05)])), child: child)));
   }
 }
 
@@ -505,22 +509,35 @@ class _LiveGradientBackgroundState extends State<LiveGradientBackground> with Si
     _bA = TweenSequence<Alignment>([TweenSequenceItem(tween: Tween(begin: Alignment.bottomRight, end: Alignment.bottomLeft), weight: 1), TweenSequenceItem(tween: Tween(begin: Alignment.bottomLeft, end: Alignment.topLeft), weight: 1), TweenSequenceItem(tween: Tween(begin: Alignment.topLeft, end: Alignment.topRight), weight: 1), TweenSequenceItem(tween: Tween(begin: Alignment.topRight, end: Alignment.bottomRight), weight: 1)]).animate(_c);
     _check();
   }
-  void _check() { WidgetsBinding.instance.addPostFrameCallback((_) { if(mounted) context.read<SettingsProvider>().tier == PerformanceTier.low ? _c.stop() : _c.repeat(reverse: true); }); }
+  void _check() { WidgetsBinding.instance.addPostFrameCallback((_) { if(mounted) { final t = context.read<SettingsProvider>().tier; if (t == PerformanceTier.low) _c.stop(); else if (t == PerformanceTier.mid) { _c.duration = const Duration(seconds: 30); _c.repeat(reverse: true); } else { _c.duration = const Duration(seconds: 15); _c.repeat(reverse: true); } } }); }
   @override void didChangeDependencies() { super.didChangeDependencies(); _check(); }
   @override void dispose() { _c.dispose(); super.dispose(); }
-  @override Widget build(BuildContext context) => AnimatedBuilder(animation: _c, builder: (ctx, _) => Container(width: double.infinity, height: double.infinity, decoration: BoxDecoration(gradient: LinearGradient(colors: const[kColorCream, kColorPeach], begin: _tA.value, end: _bA.value)), child: widget.child));
+  @override Widget build(BuildContext context) => Stack(children:[
+    AnimatedBuilder(animation: _c, builder: (ctx, _) => Container(width: double.infinity, height: double.infinity, decoration: BoxDecoration(gradient: LinearGradient(colors: const[kColorCream, kColorPeach], begin: _tA.value, end: _bA.value)))),
+    RepaintBoundary(child: widget.child),
+  ]);
 }
 
 class FloatingOrbsBackground extends StatelessWidget {
   const FloatingOrbsBackground({super.key});
   Widget _orb(double s, Color c) => Container(width: s, height: s, decoration: BoxDecoration(shape: BoxShape.circle, gradient: RadialGradient(colors:[c, c.withOpacity(0)], stops: const[0.4, 1.0])));
   @override Widget build(BuildContext context) {
-    if (context.select<SettingsProvider, PerformanceTier>((p) => p.tier) == PerformanceTier.low) return Container(color: Colors.transparent);
+    final tier = context.select<SettingsProvider, PerformanceTier>((p) => p.tier);
+    if (tier == PerformanceTier.low) return Container(color: Colors.transparent);
+    final blurSigma = tier == PerformanceTier.high ? 25.0 : 15.0;
+    final animate = tier == PerformanceTier.high;
     return Stack(children:[
-      Positioned(top: -100, right: -100, child: _orb(400, kColorPeach).animate(onPlay: (c) => c.repeat(reverse: true)).scale(begin: const Offset(1,1), end: const Offset(1.2,1.2), duration: 6.seconds).rotate(begin: 0, end: 0.1, duration: 8.seconds)),
-      Positioned(bottom: -150, left: -100, child: _orb(450, kColorCoral.withOpacity(0.4)).animate(onPlay: (c) => c.repeat(reverse: true)).scale(begin: const Offset(1,1), end: const Offset(1.3,1.3), duration: 7.seconds).move(begin: Offset.zero, end: const Offset(20,-20), duration: 5.seconds)),
-      Align(alignment: const Alignment(0, -0.3), child: _orb(300, kColorSoftPink.withOpacity(0.3)).animate(onPlay: (c) => c.repeat(reverse: true)).scale(begin: const Offset(0.8,0.8), end: const Offset(1.1,1.1), duration: 5.seconds).fadeIn()),
-      Positioned.fill(child: BackdropFilter(filter: ImageFilter.blur(sigmaX: 40, sigmaY: 40), child: Container(color: Colors.transparent))),
+      if (animate)
+        Positioned(top: -100, right: -100, child: _orb(400, kColorPeach).animate(onPlay: (c) => c.repeat(reverse: true)).scale(begin: const Offset(1,1), end: const Offset(1.2,1.2), duration: 6.seconds).rotate(begin: 0, end: 0.1, duration: 8.seconds))
+      else
+        Positioned(top: -100, right: -100, child: _orb(300, kColorPeach.withOpacity(0.6))),
+      if (animate)
+        Positioned(bottom: -150, left: -100, child: _orb(450, kColorCoral.withOpacity(0.4)).animate(onPlay: (c) => c.repeat(reverse: true)).scale(begin: const Offset(1,1), end: const Offset(1.3,1.3), duration: 7.seconds).move(begin: Offset.zero, end: const Offset(20,-20), duration: 5.seconds))
+      else
+        Positioned(bottom: -100, left: -80, child: _orb(300, kColorCoral.withOpacity(0.25))),
+      if (animate)
+        Align(alignment: const Alignment(0, -0.3), child: _orb(300, kColorSoftPink.withOpacity(0.3)).animate(onPlay: (c) => c.repeat(reverse: true)).scale(begin: const Offset(0.8,0.8), end: const Offset(1.1,1.1), duration: 5.seconds).fadeIn()),
+      Positioned.fill(child: BackdropFilter(filter: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma), child: Container(color: Colors.transparent))),
     ]);
   }
 }
