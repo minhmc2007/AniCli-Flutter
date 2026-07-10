@@ -26,6 +26,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'i18n.dart';
 
 // Global Definitions & App State
 const String kAppVersion = "1.8.10";
@@ -60,6 +61,13 @@ class AniCliApp extends StatelessWidget {
     return MaterialApp(
       title: 'AniCli Flutter',
       debugShowCheckedModeBanner: false,
+      locale: context.watch<SettingsProvider>().locale == AppLocale.vi ? const Locale('vi', 'VN') : null,
+      localizationsDelegates: const [
+        DefaultMaterialLocalizations.delegate,
+        DefaultCupertinoLocalizations.delegate,
+        DefaultWidgetsLocalizations.delegate,
+      ],
+      supportedLocales: const [Locale('en', 'US'), Locale('vi', 'VN')],
       theme: ThemeData(
         brightness: Brightness.light,
         scaffoldBackgroundColor: kColorCream,
@@ -145,11 +153,13 @@ class SettingsProvider extends ChangeNotifier {
   PerformanceMode _perfMode = PerformanceMode.auto;
   PerformanceTier _currentTier = PerformanceTier.high;
   double _detectedRamGB = -1;
+  AppLocale _locale = AppLocale.en;
 
   bool get useInternalPlayer => _useInternalPlayer;
   double get cacheSecs => _cacheSecs;
   PerformanceMode get perfMode => _perfMode;
   PerformanceTier get tier => _currentTier;
+  AppLocale get locale => _locale;
   String get ramDebugInfo => _detectedRamGB == -1 ? "Unknown" : "${_detectedRamGB.toStringAsFixed(1)} GB";
 
   SettingsProvider() { _loadSettings(); }
@@ -158,12 +168,14 @@ class SettingsProvider extends ChangeNotifier {
     _useInternalPlayer = prefs.getBool('use_internal_player') ?? false;
     _cacheSecs = prefs.getDouble('cache_secs') ?? 120.0;
     _perfMode = PerformanceMode.values[prefs.getInt('perf_mode') ?? 0];
+    _locale = prefs.getString('app_locale') == 'vi' ? AppLocale.vi : AppLocale.en;
     await initPerformanceMode();
   }
   Future<void> initPerformanceMode() async {
     if (_detectedRamGB == -1) _detectedRamGB = await MemoryUtils.getTotalRamGB();
     _calculateTier(); notifyListeners();
   }
+  void setLocale(AppLocale l) async { _locale = l; final p = await SharedPreferences.getInstance(); await p.setString('app_locale', l == AppLocale.vi ? 'vi' : 'en'); notifyListeners(); }
   void _calculateTier() {
     if (_perfMode == PerformanceMode.bestLooking) _currentTier = PerformanceTier.high;
     else if (_perfMode == PerformanceMode.balanced) _currentTier = PerformanceTier.mid;
@@ -210,7 +222,7 @@ class ProgressProvider extends ChangeNotifier {
 }
 
 class BackupService {
-  static const _keys = ['anime_source', 'manga_source', 'use_internal_player', 'cache_secs', 'perf_mode', 'favorites', 'nsfw_favorites', 'history', 'nsfw_history', 'watch_progress', 'manga_page_progress'];
+  static const _keys = ['anime_source', 'manga_source', 'use_internal_player', 'cache_secs', 'perf_mode', 'app_locale', 'favorites', 'nsfw_favorites', 'history', 'nsfw_history', 'watch_progress', 'manga_page_progress'];
 
   static Future<String> exportData() async {
     final prefs = await SharedPreferences.getInstance();
@@ -1408,12 +1420,12 @@ class _HistoryViewState extends State<HistoryView> with AutomaticKeepAliveClient
     return Column(children:[
       const SizedBox(height: 60),
       Row(mainAxisAlignment: MainAxisAlignment.center, children:[
-        Text(isNSFW ? "Incognito History" : "History", style: GoogleFonts.inter(fontSize: 32, fontWeight: FontWeight.bold, color: kColorCoral)),
+        Text(isNSFW ? context.tr('incognito_history') : context.tr('tab_history'), style: GoogleFonts.inter(fontSize: 32, fontWeight: FontWeight.bold, color: kColorCoral)),
         if (history.isNotEmpty) Padding(padding: const EdgeInsets.only(left: 10), child: IconButton(icon: const Icon(LucideIcons.trash2, size: 20, color: kColorDarkText), onPressed: () => context.read<UserProvider>().clearHistory()))
       ]).adapt(t),
       const SizedBox(height: 20),
       Expanded(child: history.isEmpty
-      ? Center(child: Column(mainAxisSize: MainAxisSize.min, children:[Icon(isNSFW ? LucideIcons.eyeOff : LucideIcons.ghost, size: 60, color: kColorCoral.withOpacity(0.5)), const SizedBox(height: 10), Text(isNSFW ? "No secrets here yet..." : "Nothing here yet...", style: GoogleFonts.inter(color: Colors.black45, fontSize: 16))]))
+      ? Center(child: Column(mainAxisSize: MainAxisSize.min, children:[Icon(isNSFW ? LucideIcons.eyeOff : LucideIcons.ghost, size: 60, color: kColorCoral.withOpacity(0.5)), const SizedBox(height: 10), Text(isNSFW ? context.tr('no_incognito_history') : context.tr('no_history'), style: GoogleFonts.inter(color: Colors.black45, fontSize: 16))]))
       : ListView.builder(padding: EdgeInsets.symmetric(horizontal: isMobile ? 20 : 40, vertical: 10), physics: const BouncingScrollPhysics(), itemCount: history.length, itemBuilder: (ctx, i) => HistoryCard(
         item: history[i], onTap: () => widget.onAnimeTap(history[i].anime, "history_${history[i].anime.id}"),
         onContinue: widget.onContinueAnime != null ? () => widget.onContinueAnime!(history[i].anime, history[i].episode) : null,
@@ -1448,10 +1460,10 @@ class _FavoritesViewState extends State<FavoritesView> with AutomaticKeepAliveCl
 
     return Column(children:[
       const SizedBox(height: 60),
-      Text(isNSFW ? "Dark Favorites" : "Favorites", style: GoogleFonts.inter(fontSize: 32, fontWeight: FontWeight.bold, color: kColorCoral)).adapt(t, slideY: true, slideBegin: -0.5),
+      Text(isNSFW ? context.tr('dark_favorites') : context.tr('tab_favorites'), style: GoogleFonts.inter(fontSize: 32, fontWeight: FontWeight.bold, color: kColorCoral)).adapt(t, slideY: true, slideBegin: -0.5),
       const SizedBox(height: 20),
       Expanded(child: favorites.isEmpty
-      ? Center(child: Text(isNSFW ? "Your stash is empty." : "No favorites yet!", style: GoogleFonts.inter(color: Colors.black26)))
+      ? Center(child: Text(isNSFW ? context.tr('no_favorites_incognito') : context.tr('no_favorites'), style: GoogleFonts.inter(color: Colors.black26)))
       : AnimeGrid(animes: favorites, onTap: widget.onAnimeTap, physics: const BouncingScrollPhysics(), shrinkWrap: false, tagPrefix: "fav", continueCallbacks: continueMap.isNotEmpty ? continueMap : null))
     ]);
   }
@@ -1598,30 +1610,44 @@ class _SettingsViewState extends State<SettingsView> {
         )
       ),
       const SizedBox(height: 15),
-      _sec("General"),
-      _cd(LucideIcons.downloadCloud, "Check for Updates", "Version Check via GitHub Releases", onTap: () => UpdaterService.checkAndUpdate(context)),
+      _sec(context.tr('settings_general')),
+      LiquidGlassContainer(opacity: 0.6, child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children:[
+        Row(children: const[Icon(LucideIcons.globe, color: kColorCoral), SizedBox(width: 10), Text("Language / Ngôn ngữ", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16))]),
+        const SizedBox(height: 10),
+        DropdownButton<AppLocale>(
+          value: sp.locale,
+          isExpanded: true, dropdownColor: kColorCream, underline: Container(height: 1, color: kColorCoral),
+          items: const[
+            DropdownMenuItem(value: AppLocale.en, child: Text("English")),
+            DropdownMenuItem(value: AppLocale.vi, child: Text("Tiếng Việt")),
+          ],
+          onChanged: (v) { if (v != null) sp.setLocale(v); }
+        )
+      ]))),
       const SizedBox(height: 10),
-      _cd(LucideIcons.trash2, "Clear Image Cache", "Fixes broken covers by removing old cached 404s", onTap: () async {
+      _cd(LucideIcons.downloadCloud, context.tr('check_updates'), "Version Check via GitHub Releases", onTap: () => UpdaterService.checkAndUpdate(context)),
+      const SizedBox(height: 10),
+      _cd(LucideIcons.trash2, context.tr('clear_cache'), "Fixes broken covers by removing old cached 404s", onTap: () async {
         PaintingBinding.instance.imageCache.clear();
         PaintingBinding.instance.imageCache.clearLiveImages();
         try { await DefaultCacheManager().emptyCache(); } catch (_) {}
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Image cache cleared!"), backgroundColor: Colors.green));
       }),
       const SizedBox(height: 10),
-      _cd(LucideIcons.archive, "Backup Data", "Export all data to a file", onTap: () async {
+      _cd(LucideIcons.archive, context.tr('backup_data'), "Export all data to a file", onTap: () async {
         try {
           final json = await BackupService.exportData();
-          final path = await FilePicker.saveFile(dialogTitle: "Save Backup", fileName: "anicli_backup.json", type: FileType.custom, allowedExtensions: ['json']);
+          final path = await FilePicker.saveFile(dialogTitle: context.tr('save_backup'), fileName: "anicli_backup.json", type: FileType.custom, allowedExtensions: ['json']);
           if (path != null) {
             await File(path).writeAsString(json);
-            if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Backup saved!"), backgroundColor: Colors.green));
+            if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(context.tr('backup_saved')), backgroundColor: Colors.green));
           }
         } catch (e) {
           if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Backup failed: $e"), backgroundColor: Colors.red));
         }
       }),
       const SizedBox(height: 10),
-      _cd(LucideIcons.upload, "Restore Data", "Import data from a backup file", onTap: () async {
+      _cd(LucideIcons.upload, context.tr('restore_data'), "Import data from a backup file", onTap: () async {
         try {
           final result = await FilePicker.pickFiles(type: FileType.custom, allowedExtensions: ['json']);
           if (result == null || result.files.isEmpty) return;
@@ -1634,9 +1660,9 @@ class _SettingsViewState extends State<SettingsView> {
               await context.read<MangaSourceProvider>().reload();
               await context.read<SettingsProvider>().reload();
               await context.read<ProgressProvider>().reload();
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Data restored! Restart app to apply."), backgroundColor: Colors.green));
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(context.tr('data_restored')), backgroundColor: Colors.green));
             } else {
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Invalid backup file"), backgroundColor: Colors.red));
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(context.tr('invalid_backup')), backgroundColor: Colors.red));
             }
           }
         } catch (e) {
@@ -2011,7 +2037,7 @@ class FeaturedCarousel extends StatelessWidget {
 class GlassDock extends StatelessWidget {
   final int selectedIndex; final Function(int) onItemSelected; const GlassDock({super.key, required this.selectedIndex, required this.onItemSelected});
   @override Widget build(BuildContext context) {
-    final isMobile = MediaQuery.of(context).size.width < 900; final items =[(LucideIcons.search, "Browse"), (LucideIcons.history, "History"), (LucideIcons.heart, "Favorites"), (LucideIcons.settings, "Settings")];
+    final isMobile = MediaQuery.of(context).size.width < 900; final t = Translations.of(context); final items =[(LucideIcons.search, t.tr('tab_browse')), (LucideIcons.history, t.tr('tab_history')), (LucideIcons.heart, t.tr('tab_favorites')), (LucideIcons.settings, t.tr('tab_settings'))];
     return LiquidGlassContainer(borderRadius: BorderRadius.circular(30), opacity: 0.6, useBlur: true, child: Padding(padding: EdgeInsets.symmetric(horizontal: isMobile ? 10 : 20, vertical: 12), child: Row(mainAxisSize: MainAxisSize.min, children: List.generate(items.length, (i) => Padding(padding: const EdgeInsets.symmetric(horizontal: 8), child: IconButton(icon: Icon(items[i].$1, color: selectedIndex == i ? kColorCoral : Colors.black38, size: isMobile ? 20 : 24), onPressed: () => onItemSelected(i), tooltip: items[i].$2))))));
   }
 }
