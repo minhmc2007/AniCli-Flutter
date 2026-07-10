@@ -451,7 +451,7 @@ class LiquidGlassContainer extends StatelessWidget {
               Colors.white.withOpacity(tier == PerformanceTier.high ? 0.5 : 0.9),
               Colors.white.withOpacity(tier == PerformanceTier.high ? 0.08 : 0.9),
             ]),
-        color: tier != PerformanceTier.mid ? Colors.white.withOpacity(o) : null,
+        color: Colors.white.withOpacity(o),
       ),
       child: child,
     );
@@ -1624,6 +1624,6 @@ class GlassDock extends StatelessWidget {
   final int selectedIndex; final Function(int) onItemSelected; const GlassDock({super.key, required this.selectedIndex, required this.onItemSelected});
   @override Widget build(BuildContext context) {
     final isMobile = MediaQuery.of(context).size.width < 900; final items =[(LucideIcons.search, "Browse"), (LucideIcons.history, "History"), (LucideIcons.heart, "Favorites"), (LucideIcons.settings, "Settings")];
-    return LiquidGlassContainer(borderRadius: BorderRadius.circular(30), useBlur: true, child: Padding(padding: EdgeInsets.symmetric(horizontal: isMobile ? 10 : 20, vertical: 12), child: Row(mainAxisSize: MainAxisSize.min, children: List.generate(items.length, (i) => Padding(padding: const EdgeInsets.symmetric(horizontal: 8), child: IconButton(icon: Icon(items[i].$1, color: selectedIndex == i ? kColorCoral : Colors.black38, size: isMobile ? 20 : 24), onPressed: () => onItemSelected(i), tooltip: items[i].$2))))));
+    return LiquidGlassContainer(borderRadius: BorderRadius.circular(30), opacity: 0.65, useBlur: true, child: Padding(padding: EdgeInsets.symmetric(horizontal: isMobile ? 10 : 20, vertical: 12), child: Row(mainAxisSize: MainAxisSize.min, children: List.generate(items.length, (i) => Padding(padding: const EdgeInsets.symmetric(horizontal: 8), child: IconButton(icon: Icon(items[i].$1, color: selectedIndex == i ? kColorCoral : Colors.black38, size: isMobile ? 20 : 24), onPressed: () => onItemSelected(i), tooltip: items[i].$2))))));
   }
 }
