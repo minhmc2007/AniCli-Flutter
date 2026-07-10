@@ -20,6 +20,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:animeclient/api/providers/hls_proxy.dart';
 import 'package:open_file/open_file.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
@@ -130,6 +131,7 @@ class SourceProvider extends ChangeNotifier {
     debugPrint('[DEBUG] SourceProvider.setSource: saved "${s.name}" to prefs');
     notifyListeners();
   }
+  Future<void> reload() async { _loaded = false; _loadSource(); }
 }
 
 
@@ -176,6 +178,7 @@ class SettingsProvider extends ChangeNotifier {
   void toggleInternalPlayer(bool v) async { _useInternalPlayer = v; final p = await SharedPreferences.getInstance(); await p.setBool('use_internal_player', v); notifyListeners(); }
   void setCacheSecs(double v) async { _cacheSecs = v; final p = await SharedPreferences.getInstance(); await p.setDouble('cache_secs', v); notifyListeners(); }
   void setPerformanceMode(PerformanceMode m) async { _perfMode = m; _calculateTier(); final p = await SharedPreferences.getInstance(); await p.setInt('perf_mode', m.index); notifyListeners(); }
+  Future<void> reload() async { await _loadSettings(); }
 }
 
 class ProgressProvider extends ChangeNotifier {
@@ -203,6 +206,42 @@ class ProgressProvider extends ChangeNotifier {
     await prefs.setString('manga_page_progress', jsonEncode(_mangaPage));
   }
   int getMangaPage(String mangaId, String chapterNum) => _mangaPage["${mangaId}_$chapterNum"] ?? 0;
+  Future<void> reload() async { _progress.clear(); _mangaPage.clear(); await _loadProgress(); }
+}
+
+class BackupService {
+  static const _keys = ['anime_source', 'manga_source', 'use_internal_player', 'cache_secs', 'perf_mode', 'favorites', 'nsfw_favorites', 'history', 'nsfw_history', 'watch_progress', 'manga_page_progress'];
+
+  static Future<String> exportData() async {
+    final prefs = await SharedPreferences.getInstance();
+    final data = <String, dynamic>{};
+    for (final key in _keys) {
+      final v = prefs.get(key);
+      if (v != null) data[key] = v is double ? v : (v is int ? v : v.toString());
+    }
+    const version = kAppVersion;
+    return jsonEncode({'version': version, 'data': data, 'exportedAt': DateTime.now().toIso8601String()});
+  }
+
+  static Future<bool> importData(String jsonStr) async {
+    try {
+      final map = jsonDecode(jsonStr) as Map<String, dynamic>;
+      final data = map['data'] as Map<String, dynamic>;
+      final prefs = await SharedPreferences.getInstance();
+      for (final key in _keys) {
+        final v = data[key];
+        if (v == null) continue;
+        if (v is String) { await prefs.setString(key, v); }
+        else if (v is double) { await prefs.setDouble(key, v); }
+        else if (v is int) { await prefs.setInt(key, v); }
+        else if (v is bool) { await prefs.setBool(key, v); }
+      }
+      return true;
+    } catch (e) {
+      debugPrint('Backup import error: $e');
+      return false;
+    }
+  }
 }
 
 // Utilities & Extensions
@@ -1567,6 +1606,42 @@ class _SettingsViewState extends State<SettingsView> {
         PaintingBinding.instance.imageCache.clearLiveImages();
         try { await DefaultCacheManager().emptyCache(); } catch (_) {}
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Image cache cleared!"), backgroundColor: Colors.green));
+      }),
+      const SizedBox(height: 10),
+      _cd(LucideIcons.archive, "Backup Data", "Export all data to a file", onTap: () async {
+        try {
+          final json = await BackupService.exportData();
+          final path = await FilePicker.saveFile(dialogTitle: "Save Backup", fileName: "anicli_backup.json", type: FileType.custom, allowedExtensions: ['json']);
+          if (path != null) {
+            await File(path).writeAsString(json);
+            if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Backup saved!"), backgroundColor: Colors.green));
+          }
+        } catch (e) {
+          if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Backup failed: $e"), backgroundColor: Colors.red));
+        }
+      }),
+      const SizedBox(height: 10),
+      _cd(LucideIcons.upload, "Restore Data", "Import data from a backup file", onTap: () async {
+        try {
+          final result = await FilePicker.pickFiles(type: FileType.custom, allowedExtensions: ['json']);
+          if (result == null || result.files.isEmpty) return;
+          final json = await File(result.files.first.path!).readAsString();
+          final ok = await BackupService.importData(json);
+          if (mounted) {
+            if (ok) {
+              await context.read<UserProvider>().reload();
+              await context.read<SourceProvider>().reload();
+              await context.read<MangaSourceProvider>().reload();
+              await context.read<SettingsProvider>().reload();
+              await context.read<ProgressProvider>().reload();
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Data restored! Restart app to apply."), backgroundColor: Colors.green));
+            } else {
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Invalid backup file"), backgroundColor: Colors.red));
+            }
+          }
+        } catch (e) {
+          if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Restore failed: $e"), backgroundColor: Colors.red));
+        }
       }),
       const SizedBox(height: 10),
       _sec("Performance"),

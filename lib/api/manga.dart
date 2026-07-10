@@ -164,6 +164,7 @@ class MangaSourceProvider extends ChangeNotifier {
     await prefs.setString(_key, s.name);
     notifyListeners();
   }
+  Future<void> reload() async { _loaded = false; _load(); }
 }
 
 // ════════════════════════════════════════════════════════════════════════════
