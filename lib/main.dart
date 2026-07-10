@@ -180,11 +180,15 @@ class SettingsProvider extends ChangeNotifier {
 
 class ProgressProvider extends ChangeNotifier {
   Map<String, int> _progress = {};
+  Map<String, int> _mangaPage = {};
   ProgressProvider() { _loadProgress(); }
   Future<void> _loadProgress() async {
     final prefs = await SharedPreferences.getInstance();
     final stored = prefs.getString('watch_progress');
-    if (stored != null) { _progress = Map<String, int>.from(jsonDecode(stored)); notifyListeners(); }
+    if (stored != null) { _progress = Map<String, int>.from(jsonDecode(stored)); }
+    final mangaStored = prefs.getString('manga_page_progress');
+    if (mangaStored != null) { _mangaPage = Map<String, int>.from(jsonDecode(mangaStored)); }
+    notifyListeners();
   }
   Future<void> saveProgress(String animeId, String epNum, int seconds) async {
     _progress["${animeId}_$epNum"] = seconds;
@@ -192,6 +196,13 @@ class ProgressProvider extends ChangeNotifier {
     await prefs.setString('watch_progress', jsonEncode(_progress));
   }
   int getProgress(String animeId, String epNum) => _progress["${animeId}_$epNum"] ?? 0;
+
+  Future<void> saveMangaPage(String mangaId, String chapterNum, int pageIndex) async {
+    _mangaPage["${mangaId}_$chapterNum"] = pageIndex;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('manga_page_progress', jsonEncode(_mangaPage));
+  }
+  int getMangaPage(String mangaId, String chapterNum) => _mangaPage["${mangaId}_$chapterNum"] ?? 0;
 }
 
 // Utilities & Extensions
@@ -610,8 +621,15 @@ class _SourceOpt extends StatelessWidget {
 class MainScreen extends StatefulWidget { const MainScreen({super.key}); @override State<MainScreen> createState() => _MainScreenState(); }
 class _MainScreenState extends State<MainScreen> {
   int _idx = 0; final GlobalKey _hKey = GlobalKey(), _fKey = GlobalKey(), _sKey = GlobalKey();
-  void _openDetail(AnimeModel anime, String heroTag) {
-    Navigator.of(context).push(PageRouteBuilder(pageBuilder: (c, a, s) => AnimeDetailView(anime: anime, heroTag: heroTag), transitionsBuilder: (c, a, s, child) => context.read<SettingsProvider>().tier == PerformanceTier.low ? child : FadeTransition(opacity: a, child: child), transitionDuration: const Duration(milliseconds: 600)));
+  void _openDetail(AnimeModel anime, String heroTag, {String? initialEpisode}) {
+    Navigator.of(context).push(PageRouteBuilder(pageBuilder: (c, a, s) => AnimeDetailView(anime: anime, heroTag: heroTag, initialEpisode: initialEpisode), transitionsBuilder: (c, a, s, child) => context.read<SettingsProvider>().tier == PerformanceTier.low ? child : FadeTransition(opacity: a, child: child), transitionDuration: const Duration(milliseconds: 600)));
+  }
+  void _continueAnime(AnimeModel anime, String episode) {
+    if (anime.isManga) {
+      Navigator.push(context, MaterialPageRoute(builder: (_) => MangaReaderScreen(anime: anime, chapterNum: episode, allChapters: [])));
+    } else {
+      _openDetail(anime, "continue_${anime.id}", initialEpisode: episode);
+    }
   }
   @override void initState() { super.initState(); UpdaterService.checkSilent(context); }
   @override Widget build(BuildContext context) {
@@ -621,8 +639,8 @@ class _MainScreenState extends State<MainScreen> {
     Widget activePage; Key activeKey;
     switch (_idx) {
       case 0: activePage = BrowseView(key: ValueKey("Browse_${src.name}"), onAnimeTap: _openDetail); activeKey = ValueKey("BrowseTab_${src.name}"); break;
-      case 1: activePage = HistoryView(key: _hKey, onAnimeTap: _openDetail); activeKey = const ValueKey("HistoryTab"); break;
-      case 2: activePage = FavoritesView(key: _fKey, onAnimeTap: _openDetail); activeKey = const ValueKey("FavTab"); break;
+      case 1: activePage = HistoryView(key: _hKey, onAnimeTap: _openDetail, onContinueAnime: _continueAnime); activeKey = const ValueKey("HistoryTab"); break;
+      case 2: activePage = FavoritesView(key: _fKey, onAnimeTap: _openDetail, onContinueAnime: _continueAnime); activeKey = const ValueKey("FavTab"); break;
       default: activePage = SettingsView(key: _sKey); activeKey = const ValueKey("SettingsTab"); break;
     }
     final tier = context.watch<SettingsProvider>().tier;
@@ -639,83 +657,355 @@ class MangaReaderScreen extends StatefulWidget {
   const MangaReaderScreen({super.key, required this.anime, required this.chapterNum, required this.allChapters});
   @override State<MangaReaderScreen> createState() => _MangaReaderScreenState();
 }
+
+String _mangaChapterDir(AnimeModel anime, String chapterNum) {
+  final safeTitle = anime.name.replaceAll(RegExp(r'[^\w\s]+'), '');
+  final safeChap = chapterNum.replaceAll(RegExp(r'[^\w\s]+'), '_');
+  return "$safeTitle/Ch$safeChap";
+}
+
 class _MangaReaderScreenState extends State<MangaReaderScreen> {
-  bool _isLoading = true, _showControls = true, _isCtrlPressed = false; List<String> _pages =[]; int _pointerCount = 0;
-  final TransformationController _tCtrl = TransformationController(); final ScrollController _sCtrl = ScrollController();
-  
-  @override void initState() { super.initState(); _loadPages(); }
+  bool _isLoading = true, _showControls = true, _isCtrlPressed = false;
+  List<String> _pages = []; int _pointerCount = 0;
+  final TransformationController _tCtrl = TransformationController();
+  final ScrollController _sCtrl = ScrollController();
+  bool _resumed = false;
+  bool _isDownloadingChapter = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _sCtrl.addListener(_onScroll);
+    _loadPages();
+  }
+
+  @override
+  void dispose() {
+    _sCtrl.removeListener(_onScroll);
+    _sCtrl.dispose();
+    _tCtrl.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (!_sCtrl.hasClients || _pages.isEmpty) return;
+    final idx = (_sCtrl.offset / _sCtrl.position.maxScrollExtent * _pages.length).round().clamp(0, _pages.length - 1);
+    context.read<ProgressProvider>().saveMangaPage(widget.anime.id, widget.chapterNum, idx);
+  }
+
+  Future<String> _localDir() async {
+    final base = await getApplicationDocumentsDirectory();
+    return base.path;
+  }
+
+  bool _isChapterDownloaded() {
+    // We check synchronously; _checkChapterDownloaded is the async version
+    return false;
+  }
+
+  Future<bool> _checkChapterDownloaded() async {
+    final base = await _localDir();
+    final chapDir = _mangaChapterDir(widget.anime, widget.chapterNum);
+    final dir = Directory("$base/$chapDir");
+    if (!await dir.exists()) return false;
+    final files = await dir.list().toList();
+    return files.isNotEmpty;
+  }
 
   Future<void> _loadPages() async {
     setState(() => _isLoading = true);
-    final src = widget.anime.sourceId;
-    final pages = src == 'zettruyen'
-      ? await ZetTruyenCore.getPages(widget.anime.id, widget.chapterNum)
-      : src == 'weebcentral'
-        ? await WeebCentralCore.getPages(widget.anime.id, widget.chapterNum)
-        : src == 'truyenqq'
-          ? await TruyenQQCore.getPages(widget.anime.id, widget.chapterNum)
-          : await MangaCore.getPages(widget.chapterNum);
-        
-    if (mounted) setState(() { _pages = pages; _isLoading = false; });
+    final base = await _localDir();
+    final chapDir = _mangaChapterDir(widget.anime, widget.chapterNum);
+    final localDir = Directory("$base/$chapDir");
+    List<String> pages;
+
+    if (await localDir.exists()) {
+      final files = await localDir.list().toList();
+      files.sort((a, b) => a.path.compareTo(b.path));
+      pages = files.map((f) => f.path).toList();
+    } else {
+      final src = widget.anime.sourceId;
+      pages = src == 'zettruyen'
+          ? await ZetTruyenCore.getPages(widget.anime.id, widget.chapterNum)
+          : src == 'weebcentral'
+              ? await WeebCentralCore.getPages(widget.anime.id, widget.chapterNum)
+              : src == 'truyenqq'
+                  ? await TruyenQQCore.getPages(widget.anime.id, widget.chapterNum)
+                  : await MangaCore.getPages(widget.chapterNum);
+    }
+
+    if (mounted) {
+      setState(() { _pages = pages; _isLoading = false; });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!_resumed && _sCtrl.hasClients) {
+          final saved = context.read<ProgressProvider>().getMangaPage(widget.anime.id, widget.chapterNum);
+          if (saved > 0 && saved < _pages.length) {
+            final target = (saved / _pages.length * _sCtrl.position.maxScrollExtent).clamp(0.0, _sCtrl.position.maxScrollExtent);
+            _sCtrl.jumpTo(target);
+            _resumed = true;
+          }
+        }
+      });
+    }
   }
 
   void _nav(String newChap) {
     context.read<UserProvider>().addToHistory(widget.anime, newChap);
-    Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => MangaReaderScreen(anime: widget.anime, chapterNum: newChap, allChapters: widget.allChapters)));
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (_) => MangaReaderScreen(
+          anime: widget.anime, chapterNum: newChap, allChapters: widget.allChapters,
+        ),
+      ),
+    );
   }
 
-  Future<void> _downloadImage(String url, int index) async {
+  Map<String, String> _sourceHeaders() {
+    final src = widget.anime.sourceId;
+    if (src == 'zettruyen') return {'referer': 'https://www.zettruyen.ink/'};
+    if (src == 'truyenqq') return {'referer': 'https://truyenqq.com.vn/'};
+    return {'User-Agent': 'AniCli/1.0'};
+  }
+
+  Future<void> _downloadChapter() async {
+    setState(() => _isDownloadingChapter = true);
     try {
-      final src = widget.anime.sourceId;
-    final headers = src == 'zettruyen'
-        ? const {'referer': 'https://www.zettruyen.ink/'}
-        : src == 'truyenqq'
-            ? const {'referer': 'https://truyenqq.com.vn/'}
-            : const {'User-Agent': 'AniCli/1.0'};
-      final res = await http.get(Uri.parse(url), headers: headers);
-      if (res.statusCode == 200) {
-        final dir = Platform.isAndroid ? await getExternalStorageDirectory() : await getDownloadsDirectory();
-        final safeTitle = widget.anime.name.replaceAll(RegExp(r'[^\w\s]+'), '');
-        final file = File("${dir?.path}/$safeTitle/Ch${widget.chapterNum}/page_$index.jpg");
-        await file.create(recursive: true); await file.writeAsBytes(res.bodyBytes);
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Saved page $index to ${file.path}")));
+      final base = await _localDir();
+      final chapDir = _mangaChapterDir(widget.anime, widget.chapterNum);
+      final dir = Directory("$base/$chapDir");
+      if (await dir.exists()) await dir.delete(recursive: true);
+      await dir.create(recursive: true);
+
+      final headers = _sourceHeaders();
+      for (int i = 0; i < _pages.length; i++) {
+        final res = await http.get(Uri.parse(_pages[i]), headers: headers);
+        if (res.statusCode == 200) {
+          final file = File("${dir.path}/page_${i + 1}.jpg");
+          await file.writeAsBytes(res.bodyBytes);
+        }
       }
-    } catch (e) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error saving image: $e"))); }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Chapter downloaded for offline reading")),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Download failed: $e")),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isDownloadingChapter = false);
+    }
+  }
+
+  Future<void> _deleteDownloadedChapter() async {
+    final base = await _localDir();
+    final chapDir = _mangaChapterDir(widget.anime, widget.chapterNum);
+    final dir = Directory("$base/$chapDir");
+    if (await dir.exists()) {
+      await dir.delete(recursive: true);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Downloaded chapter deleted")),
+        );
+      }
+    }
   }
 
   @override Widget build(BuildContext context) {
     final idx = widget.allChapters.indexOf(widget.chapterNum);
-    final src = widget.anime.sourceId;
-    final headers = src == 'zettruyen'
-        ? const {'referer': 'https://www.zettruyen.ink/'}
-        : src == 'truyenqq'
-            ? const {'referer': 'https://truyenqq.com.vn/'}
-            : const {'User-Agent': 'AniCli/1.0'};
+    final headers = _sourceHeaders();
+    final displayChap = widget.chapterNum.contains('|') ? widget.chapterNum.split('|')[1] : widget.chapterNum;
 
-    return Scaffold(backgroundColor: Colors.black, body: KeyboardListener(focusNode: FocusNode()..requestFocus(), onKeyEvent: (e) { if (e.logicalKey == LogicalKeyboardKey.controlLeft || e.logicalKey == LogicalKeyboardKey.controlRight) setState(() => _isCtrlPressed = e is KeyDownEvent || e is KeyRepeatEvent); }, child: Stack(children:[
-      Listener(
-        onPointerDown: (_) => setState(() => _pointerCount++), onPointerUp: (_) => setState(() => _pointerCount--), onPointerCancel: (_) => setState(() => _pointerCount = 0),
-        onPointerSignal: (e) {
-          if (e is PointerScrollEvent) {
-            if (_isCtrlPressed) {
-              final scale = e.scrollDelta.dy < 0 ? 1.1 : 0.9; final currentMatrix = _tCtrl.value;
-              final newScale = (currentMatrix.getMaxScaleOnAxis() * scale).clamp(0.01, 10.0);
-              if (newScale >= 0.01 && newScale <= 10.0) {
-                final c = Offset(MediaQuery.of(context).size.width/2, MediaQuery.of(context).size.height/2);
-                _tCtrl.value = (Matrix4.identity()..translate(c.dx, c.dy)..scale(scale)..translate(-c.dx, -c.dy)) * currentMatrix;
-              }
-            } else if (_sCtrl.hasClients) _sCtrl.jumpTo((_sCtrl.offset + e.scrollDelta.dy).clamp(_sCtrl.position.minScrollExtent, _sCtrl.position.maxScrollExtent));
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: KeyboardListener(
+        focusNode: FocusNode()..requestFocus(),
+        onKeyEvent: (e) {
+          if (e.logicalKey == LogicalKeyboardKey.controlLeft ||
+              e.logicalKey == LogicalKeyboardKey.controlRight) {
+            setState(() => _isCtrlPressed = e is KeyDownEvent || e is KeyRepeatEvent);
           }
         },
-        child: GestureDetector(onTap: () => setState(() => _showControls = !_showControls), child: _isLoading ? const Center(child: CircularProgressIndicator(color: kColorCoral)) : InteractiveViewer(transformationController: _tCtrl, minScale: 0.01, maxScale: 10.0, scaleEnabled: _isCtrlPressed || _pointerCount > 1, panEnabled: true, trackpadScrollCausesScale: false, interactionEndFrictionCoefficient: 0.00001, child: ListView.builder(controller: _sCtrl, physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()), cacheExtent: 3000, itemCount: _pages.length + 1, itemBuilder: (ctx, i) {
-          if (i == _pages.length) return Padding(padding: const EdgeInsets.symmetric(vertical: 60), child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children:[
-            if (idx < widget.allChapters.length - 1) ElevatedButton(onPressed: () => _nav(widget.allChapters[idx + 1]), style: ElevatedButton.styleFrom(backgroundColor: Colors.grey[800]), child: const Text("Previous Chapter", style: TextStyle(color: Colors.white))),
-              if (idx > 0) ElevatedButton(onPressed: () => _nav(widget.allChapters[idx - 1]), style: ElevatedButton.styleFrom(backgroundColor: kColorCoral), child: const Text("Next Chapter", style: TextStyle(color: Colors.white)))
-          ]));
-          return GestureDetector(onLongPress: () => _downloadImage(_pages[i], i+1), onSecondaryTap: () => _downloadImage(_pages[i], i+1), child: Container(alignment: Alignment.center, color: Colors.black, child: CachedNetworkImage(imageUrl: _pages[i], fit: BoxFit.contain, width: double.infinity, placeholder: (_,__) => const SizedBox(height: 300, child: Center(child: CircularProgressIndicator(color: kColorCoral, strokeWidth: 2))), errorWidget: (_,__,___) => const SizedBox(height: 200, child: Center(child: Icon(Icons.broken_image, color: Colors.white54))), httpHeaders: headers)));
-        })))),
-        AnimatedPositioned(duration: const Duration(milliseconds: 300), top: _showControls ? 0 : -100, left: 0, right: 0, child: Container(color: Colors.black.withOpacity(0.8), padding: const EdgeInsets.all(10), child: SafeArea(bottom: false, child: Row(children:[IconButton(icon: const Icon(Icons.arrow_back, color: Colors.white), onPressed: () => Navigator.pop(context)), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children:[Text(widget.anime.name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold), maxLines: 1), Text("Chapter ${widget.chapterNum.contains('|') ? widget.chapterNum.split('|')[1] : widget.chapterNum}", style: const TextStyle(color: kColorCoral, fontSize: 12))]))]))))
-    ])));
+        child: Stack(children: [
+          Listener(
+            onPointerDown: (_) => setState(() => _pointerCount++),
+            onPointerUp: (_) => setState(() => _pointerCount--),
+            onPointerCancel: (_) => setState(() => _pointerCount = 0),
+            onPointerSignal: (e) {
+              if (e is PointerScrollEvent) {
+                if (_isCtrlPressed) {
+                  final scale = e.scrollDelta.dy < 0 ? 1.1 : 0.9;
+                  final currentMatrix = _tCtrl.value;
+                  final newScale = (currentMatrix.getMaxScaleOnAxis() * scale).clamp(0.01, 10.0);
+                  if (newScale >= 0.01 && newScale <= 10.0) {
+                    final c = Offset(
+                      MediaQuery.of(context).size.width / 2,
+                      MediaQuery.of(context).size.height / 2,
+                    );
+                    _tCtrl.value = (Matrix4.identity()
+                          ..translate(c.dx, c.dy)
+                          ..scale(scale)
+                          ..translate(-c.dx, -c.dy)) *
+                        currentMatrix;
+                  }
+                } else if (_sCtrl.hasClients) {
+                  _sCtrl.jumpTo((_sCtrl.offset + e.scrollDelta.dy).clamp(
+                    _sCtrl.position.minScrollExtent,
+                    _sCtrl.position.maxScrollExtent,
+                  ));
+                }
+              }
+            },
+            child: GestureDetector(
+              onTap: () => setState(() => _showControls = !_showControls),
+              child: _isLoading
+                  ? const Center(
+                      child: CircularProgressIndicator(color: kColorCoral))
+                  : InteractiveViewer(
+                      transformationController: _tCtrl,
+                      minScale: 0.01,
+                      maxScale: 10.0,
+                      scaleEnabled: _isCtrlPressed || _pointerCount > 1,
+                      panEnabled: true,
+                      trackpadScrollCausesScale: false,
+                      interactionEndFrictionCoefficient: 0.00001,
+                      child: ListView.builder(
+                        controller: _sCtrl,
+                        physics: const AlwaysScrollableScrollPhysics(
+                            parent: BouncingScrollPhysics()),
+                        cacheExtent: 3000,
+                        itemCount: _pages.length + 1,
+                        itemBuilder: (ctx, i) {
+                          if (i == _pages.length) {
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 60),
+                              child: Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceEvenly,
+                                children: [
+                                  if (idx < widget.allChapters.length - 1)
+                                    ElevatedButton(
+                                      onPressed: () =>
+                                          _nav(widget.allChapters[idx + 1]),
+                                      style: ElevatedButton.styleFrom(
+                                          backgroundColor: Colors.grey[800]),
+                                      child: const Text("Previous Chapter",
+                                          style: TextStyle(
+                                              color: Colors.white)),
+                                    ),
+                                  if (idx > 0)
+                                    ElevatedButton(
+                                      onPressed: () =>
+                                          _nav(widget.allChapters[idx - 1]),
+                                      style: ElevatedButton.styleFrom(
+                                          backgroundColor: kColorCoral),
+                                      child: const Text("Next Chapter",
+                                          style: TextStyle(
+                                              color: Colors.white)),
+                                    ),
+                                ],
+                              ),
+                            );
+                          }
+                          return Container(
+                            alignment: Alignment.center,
+                            color: Colors.black,
+                            child: CachedNetworkImage(
+                              imageUrl: _pages[i],
+                              fit: BoxFit.contain,
+                              width: double.infinity,
+                              placeholder: (_, __) => const SizedBox(
+                                height: 300,
+                                child: Center(
+                                  child: CircularProgressIndicator(
+                                      color: kColorCoral, strokeWidth: 2),
+                                ),
+                              ),
+                              errorWidget: (_, __, ___) => const SizedBox(
+                                height: 200,
+                                child: Center(
+                                  child: Icon(Icons.broken_image,
+                                      color: Colors.white54),
+                                ),
+                              ),
+                              httpHeaders: headers,
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+            ),
+          ),
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 300),
+            top: _showControls ? 0 : -100,
+            left: 0,
+            right: 0,
+            child: Container(
+              color: Colors.black.withOpacity(0.8),
+              padding: const EdgeInsets.all(10),
+              child: SafeArea(
+                bottom: false,
+                child: Row(children: [
+                  IconButton(
+                    icon: const Icon(Icons.arrow_back, color: Colors.white),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(widget.anime.name,
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold),
+                            maxLines: 1),
+                        Text("Chapter $displayChap",
+                            style: const TextStyle(
+                                color: kColorCoral, fontSize: 12)),
+                      ],
+                    ),
+                  ),
+                  FutureBuilder<bool>(
+                    future: _checkChapterDownloaded(),
+                    builder: (ctx, snap) {
+                      final downloaded = snap.data ?? false;
+                      return IconButton(
+                        icon: _isDownloadingChapter
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2, color: Colors.white))
+                            : Icon(
+                                downloaded
+                                    ? LucideIcons.trash2
+                                    : LucideIcons.download,
+                                color: Colors.white),
+                        onPressed: _isDownloadingChapter
+                            ? null
+                            : () {
+                                if (downloaded) {
+                                  _deleteDownloadedChapter().then((_) =>
+                                      setState(() {}));
+                                } else {
+                                  _downloadChapter();
+                                }
+                              },
+                      );
+                    },
+                  ),
+                ]),
+              ),
+            ),
+          ),
+        ]),
+      ),
+    );
   }
 }
 
@@ -1061,7 +1351,12 @@ class _BrowseViewState extends State<BrowseView> with AutomaticKeepAliveClientMi
   }
 }
 
-class HistoryView extends StatefulWidget { final Function(AnimeModel, String) onAnimeTap; const HistoryView({super.key, required this.onAnimeTap}); @override State<HistoryView> createState() => _HistoryViewState(); }
+class HistoryView extends StatefulWidget {
+  final Function(AnimeModel, String) onAnimeTap;
+  final Function(AnimeModel, String)? onContinueAnime;
+  const HistoryView({super.key, required this.onAnimeTap, this.onContinueAnime});
+  @override State<HistoryView> createState() => _HistoryViewState();
+}
 class _HistoryViewState extends State<HistoryView> with AutomaticKeepAliveClientMixin {
   @override bool get wantKeepAlive => true;
   @override Widget build(BuildContext context) {
@@ -1080,19 +1375,37 @@ class _HistoryViewState extends State<HistoryView> with AutomaticKeepAliveClient
       const SizedBox(height: 20),
       Expanded(child: history.isEmpty
       ? Center(child: Column(mainAxisSize: MainAxisSize.min, children:[Icon(isNSFW ? LucideIcons.eyeOff : LucideIcons.ghost, size: 60, color: kColorCoral.withOpacity(0.5)), const SizedBox(height: 10), Text(isNSFW ? "No secrets here yet..." : "Nothing here yet...", style: GoogleFonts.inter(color: Colors.black45, fontSize: 16))]))
-      : ListView.builder(padding: EdgeInsets.symmetric(horizontal: isMobile ? 20 : 40, vertical: 10), physics: const BouncingScrollPhysics(), itemCount: history.length, itemBuilder: (ctx, i) => HistoryCard(item: history[i], onTap: () => widget.onAnimeTap(history[i].anime, "history_${history[i].anime.id}")).simpleDrop(t, delay: i > 8 ? 0 : i * 50)))
+      : ListView.builder(padding: EdgeInsets.symmetric(horizontal: isMobile ? 20 : 40, vertical: 10), physics: const BouncingScrollPhysics(), itemCount: history.length, itemBuilder: (ctx, i) => HistoryCard(
+        item: history[i], onTap: () => widget.onAnimeTap(history[i].anime, "history_${history[i].anime.id}"),
+        onContinue: widget.onContinueAnime != null ? () => widget.onContinueAnime!(history[i].anime, history[i].episode) : null,
+      ).simpleDrop(t, delay: i > 8 ? 0 : i * 50)))
     ]);
   }
 }
 
-class FavoritesView extends StatefulWidget { final Function(AnimeModel, String) onAnimeTap; const FavoritesView({super.key, required this.onAnimeTap}); @override State<FavoritesView> createState() => _FavoritesViewState(); }
+class FavoritesView extends StatefulWidget {
+  final Function(AnimeModel, String) onAnimeTap;
+  final Function(AnimeModel, String)? onContinueAnime;
+  const FavoritesView({super.key, required this.onAnimeTap, this.onContinueAnime}); @override State<FavoritesView> createState() => _FavoritesViewState(); }
 class _FavoritesViewState extends State<FavoritesView> with AutomaticKeepAliveClientMixin {
   @override bool get wantKeepAlive => true;
   @override Widget build(BuildContext context) {
     super.build(context);
     final isNSFW = context.watch<UserProvider>().isNSFW;
     final favorites = context.watch<UserProvider>().favorites;
+    final history = context.watch<UserProvider>().history;
     final t = context.watch<SettingsProvider>().tier;
+
+    final continueMap = <String, VoidCallback>{};
+    if (widget.onContinueAnime != null) {
+      for (final fav in favorites) {
+        final found = history.where((h) => h.anime.id == fav.id);
+        if (found.isNotEmpty) {
+          final episode = found.first.episode;
+          continueMap[fav.id] = () => widget.onContinueAnime!(fav, episode);
+        }
+      }
+    }
 
     return Column(children:[
       const SizedBox(height: 60),
@@ -1100,7 +1413,7 @@ class _FavoritesViewState extends State<FavoritesView> with AutomaticKeepAliveCl
       const SizedBox(height: 20),
       Expanded(child: favorites.isEmpty
       ? Center(child: Text(isNSFW ? "Your stash is empty." : "No favorites yet!", style: GoogleFonts.inter(color: Colors.black26)))
-      : AnimeGrid(animes: favorites, onTap: widget.onAnimeTap, physics: const BouncingScrollPhysics(), shrinkWrap: false, tagPrefix: "fav"))
+      : AnimeGrid(animes: favorites, onTap: widget.onAnimeTap, physics: const BouncingScrollPhysics(), shrinkWrap: false, tagPrefix: "fav", continueCallbacks: continueMap.isNotEmpty ? continueMap : null))
     ]);
   }
 }
@@ -1378,7 +1691,7 @@ class _SettingsViewState extends State<SettingsView> {
 }
 
 // Detailed Anime/Manga Display
-class AnimeDetailView extends StatefulWidget { final AnimeModel anime; final String heroTag; const AnimeDetailView({super.key, required this.anime, required this.heroTag}); @override State<AnimeDetailView> createState() => _AnimeDetailViewState(); }
+class AnimeDetailView extends StatefulWidget { final AnimeModel anime; final String heroTag; final String? initialEpisode; const AnimeDetailView({super.key, required this.anime, required this.heroTag, this.initialEpisode}); @override State<AnimeDetailView> createState() => _AnimeDetailViewState(); }
 class _AnimeDetailViewState extends State<AnimeDetailView> {
   List<String> _episodes =[]; bool _isLoading = true, _isDownloadMode = false; String? _loadingStatus;
   bool _isTitleExpanded = false;
@@ -1406,7 +1719,12 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
       items = useVi ? await ViAnimeCore.getEpisodes(widget.anime.id) : (isNSFW ? await HentaiVietsubCore.getEpisodes(widget.anime.id) : await AniCore.getEpisodes(widget.anime.id));
     }
     
-    if (mounted) setState(() { _episodes = List<String>.from(items); _isLoading = false; });
+    if (mounted) {
+      setState(() { _episodes = List<String>.from(items); _isLoading = false; });
+      if (widget.initialEpisode != null && _episodes.contains(widget.initialEpisode)) {
+        _handleItemTap(widget.initialEpisode!);
+      }
+    }
   }
 
   Future<void> _handleItemTap(String idNum) async {
@@ -1580,28 +1898,30 @@ class MorphingDownloadButton extends StatelessWidget {
 
 class AnimeGrid extends StatelessWidget {
   final List<AnimeModel> animes; final Function(AnimeModel, String) onTap; final ScrollPhysics? physics; final bool shrinkWrap; final String tagPrefix;
-  const AnimeGrid({super.key, required this.animes, required this.onTap, this.physics = const NeverScrollableScrollPhysics(), this.shrinkWrap = true, required this.tagPrefix});
+  final Map<String, VoidCallback>? continueCallbacks;
+  const AnimeGrid({super.key, required this.animes, required this.onTap, this.physics = const NeverScrollableScrollPhysics(), this.shrinkWrap = true, required this.tagPrefix, this.continueCallbacks});
   @override Widget build(BuildContext context) {
     final isMobile = MediaQuery.of(context).size.width < 900; final t = context.watch<SettingsProvider>().tier;
-    return Padding(padding: EdgeInsets.symmetric(horizontal: isMobile ? 20 : 40), child: GridView.builder(physics: physics, shrinkWrap: shrinkWrap, gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent: isMobile ? 150 : 180, childAspectRatio: 0.7, crossAxisSpacing: isMobile ? 15 : 20, mainAxisSpacing: isMobile ? 15 : 20), itemCount: animes.length, itemBuilder: (ctx, i) => AnimeCard(anime: animes[i], heroTag: "${tagPrefix}_${animes[i].id}", onTap: () => onTap(animes[i], "${tagPrefix}_${animes[i].id}")).adapt(t, delay: i * 50, isScale: true)));
+    return Padding(padding: EdgeInsets.symmetric(horizontal: isMobile ? 20 : 40), child: GridView.builder(physics: physics, shrinkWrap: shrinkWrap, gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent: isMobile ? 150 : 180, childAspectRatio: 0.7, crossAxisSpacing: isMobile ? 15 : 20, mainAxisSpacing: isMobile ? 15 : 20), itemCount: animes.length, itemBuilder: (ctx, i) => AnimeCard(anime: animes[i], heroTag: "${tagPrefix}_${animes[i].id}", onTap: () => onTap(animes[i], "${tagPrefix}_${animes[i].id}"), showPlayBadge: continueCallbacks?.containsKey(animes[i].id) ?? false, onPlay: continueCallbacks?[animes[i].id]).adapt(t, delay: i * 50, isScale: true)));
   }
 }
 
-class AnimeCard extends StatefulWidget { final AnimeModel anime; final String heroTag; final VoidCallback onTap; const AnimeCard({super.key, required this.anime, required this.heroTag, required this.onTap}); @override State<AnimeCard> createState() => _AnimeCardState(); }
+class AnimeCard extends StatefulWidget { final AnimeModel anime; final String heroTag; final VoidCallback onTap; final bool showPlayBadge; final VoidCallback? onPlay; const AnimeCard({super.key, required this.anime, required this.heroTag, required this.onTap, this.showPlayBadge=false, this.onPlay}); @override State<AnimeCard> createState() => _AnimeCardState(); }
 class _AnimeCardState extends State<AnimeCard> with AutomaticKeepAliveClientMixin {
   bool isH = false; @override bool get wantKeepAlive => true;
   @override Widget build(BuildContext context) {
     super.build(context);
-    return MouseRegion(onEnter: (_) => setState(() => isH=true), onExit: (_) => setState(() => isH=false), cursor: SystemMouseCursors.click, child: GestureDetector(onTap: widget.onTap, child: AnimatedContainer(duration: 200.ms, transform: Matrix4.identity()..scale(isH && context.watch<SettingsProvider>().tier != PerformanceTier.low ? 1.05 : 1.0), child: Stack(fit: StackFit.expand, children:[CozyHeroImage(heroTag: widget.heroTag, imageUrl: widget.anime.fullImageUrl, radius: 20, withShadow: isH, fallbackTitle: widget.anime.name), Container(decoration: BoxDecoration(borderRadius: BorderRadius.circular(20), gradient: LinearGradient(colors:[Colors.transparent, kColorDarkText.withOpacity(0.8)], begin: Alignment.center, end: Alignment.bottomCenter))), Positioned(bottom: 12, left: 12, right: 12, child: Hero(tag: "title_${widget.heroTag}", child: Material(color: Colors.transparent, child: Text(widget.anime.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white))))), if (widget.anime.isManga) Positioned(top: 10, right: 10, child: Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2), decoration: BoxDecoration(color: kColorCoral, borderRadius: BorderRadius.circular(4)), child: const Text("MANGA", style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold))))]))));
+    return MouseRegion(onEnter: (_) => setState(() => isH=true), onExit: (_) => setState(() => isH=false), cursor: SystemMouseCursors.click, child: GestureDetector(onTap: widget.onTap, child: AnimatedContainer(duration: 200.ms, transform: Matrix4.identity()..scale(isH && context.watch<SettingsProvider>().tier != PerformanceTier.low ? 1.05 : 1.0), child: Stack(fit: StackFit.expand, children:[CozyHeroImage(heroTag: widget.heroTag, imageUrl: widget.anime.fullImageUrl, radius: 20, withShadow: isH, fallbackTitle: widget.anime.name), Container(decoration: BoxDecoration(borderRadius: BorderRadius.circular(20), gradient: LinearGradient(colors:[Colors.transparent, kColorDarkText.withOpacity(0.8)], begin: Alignment.center, end: Alignment.bottomCenter))), Positioned(bottom: 12, left: 12, right: 12, child: Hero(tag: "title_${widget.heroTag}", child: Material(color: Colors.transparent, child: Text(widget.anime.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white))))), if (widget.anime.isManga) Positioned(top: 10, right: 10, child: Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2), decoration: BoxDecoration(color: kColorCoral, borderRadius: BorderRadius.circular(4)), child: const Text("MANGA", style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)))), if (widget.showPlayBadge && widget.onPlay != null) Positioned(top: 10, left: 10, child: GestureDetector(onTap: widget.onPlay, child: Container(padding: const EdgeInsets.all(6), decoration: BoxDecoration(color: kColorCoral.withOpacity(0.9), borderRadius: BorderRadius.circular(50)), child: const Icon(LucideIcons.play, color: Colors.white, size: 18))))]))));
   }
 }
 
-class HistoryCard extends StatefulWidget { final HistoryItem item; final VoidCallback onTap; const HistoryCard({super.key, required this.item, required this.onTap}); @override State<HistoryCard> createState() => _HistoryCardState(); }
+class HistoryCard extends StatefulWidget { final HistoryItem item; final VoidCallback onTap; final VoidCallback? onContinue; const HistoryCard({super.key, required this.item, required this.onTap, this.onContinue}); @override State<HistoryCard> createState() => _HistoryCardState(); }
 class _HistoryCardState extends State<HistoryCard> with AutomaticKeepAliveClientMixin {
   bool isH = false; @override bool get wantKeepAlive => true;
   @override Widget build(BuildContext context) {
     super.build(context);
-    return MouseRegion(onEnter: (_) => setState(() => isH=true), onExit: (_) => setState(() => isH=false), cursor: SystemMouseCursors.click, child: GestureDetector(onTap: widget.onTap, child: AnimatedContainer(duration: const Duration(milliseconds: 200), curve: Curves.easeOut, margin: const EdgeInsets.only(bottom: 15), height: 90, transform: Matrix4.identity()..scale(isH && context.watch<SettingsProvider>().tier != PerformanceTier.low ? 1.02 : 1.0), child: LiquidGlassContainer(opacity: isH ? 0.9 : 0.6, child: Row(children:[SizedBox(width: 90, height: 90, child: CozyHeroImage(heroTag: "history_${widget.item.anime.id}", imageUrl: widget.item.anime.fullImageUrl, radius: 15, fallbackTitle: widget.item.anime.name)), const SizedBox(width: 20), Expanded(child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children:[Text(widget.item.anime.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 16)), Text(widget.item.anime.isManga ? "Chapter ${widget.item.displayEpisode}" : "Episode ${widget.item.displayEpisode}", style: GoogleFonts.inter(color: kColorCoral, fontWeight: FontWeight.w600, fontSize: 14))])), Padding(padding: const EdgeInsets.only(right: 20), child: Icon(widget.item.anime.isManga ? LucideIcons.bookOpen : LucideIcons.playCircle, color: kColorCoral, size: 30))])))));
+    final t = context.watch<SettingsProvider>().tier;
+    return MouseRegion(onEnter: (_) => setState(() => isH=true), onExit: (_) => setState(() => isH=false), cursor: SystemMouseCursors.click, child: GestureDetector(onTap: widget.onTap, child: AnimatedContainer(duration: const Duration(milliseconds: 200), curve: Curves.easeOut, margin: const EdgeInsets.only(bottom: 15), height: 90, transform: Matrix4.identity()..scale(isH && t != PerformanceTier.low ? 1.02 : 1.0), child: LiquidGlassContainer(opacity: isH ? 0.9 : 0.6, child: Row(children:[SizedBox(width: 90, height: 90, child: CozyHeroImage(heroTag: "history_${widget.item.anime.id}", imageUrl: widget.item.anime.fullImageUrl, radius: 15, fallbackTitle: widget.item.anime.name)), const SizedBox(width: 20), Expanded(child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children:[Text(widget.item.anime.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 16)), Text(widget.item.anime.isManga ? "Chapter ${widget.item.displayEpisode}" : "Episode ${widget.item.displayEpisode}", style: GoogleFonts.inter(color: kColorCoral, fontWeight: FontWeight.w600, fontSize: 14))])), widget.onContinue != null ? IconButton(icon: Icon(widget.item.anime.isManga ? LucideIcons.bookOpen : LucideIcons.playCircle, color: kColorCoral), onPressed: widget.onContinue) : Padding(padding: const EdgeInsets.only(right: 20), child: Icon(widget.item.anime.isManga ? LucideIcons.bookOpen : LucideIcons.playCircle, color: kColorCoral, size: 30))])))));
   }
 }
 
