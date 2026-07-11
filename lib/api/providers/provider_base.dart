@@ -206,9 +206,70 @@ String makeQualifiedId(Map<String, dynamic>? extraData, String key, String defau
 // ═══════════════════════════════════════════════════════════════
 
 const List<String> defaultProviderStack = [
+  'allanime',
   'senshi',
   'anipub',
   'anineko',
-  'allanime',
   'animepahe',
 ];
+
+// ───────────────────────────────────────────────────────────────
+// RESULT MERGING HELPERS
+// ───────────────────────────────────────────────────────────────
+
+int extractEpisodeCount(String label) {
+  final patterns = [
+    RegExp(r'(\d+)\s*eps?', caseSensitive: false),
+    RegExp(r'Sub:\s*(\d+)', caseSensitive: false),
+    RegExp(r'(\d+)\s*s/', caseSensitive: false),
+    RegExp(r'(\d+)\s*episodes?', caseSensitive: false),
+  ];
+  for (final p in patterns) {
+    final m = p.firstMatch(label);
+    if (m != null) return int.tryParse(m.group(1)!) ?? 0;
+  }
+  return 0;
+}
+
+String normalizeTitle(String title) {
+  return title
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^\w\s]'), '')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+}
+
+List<SelectionOption> mergeResults(List<SelectionOption> results) {
+  if (results.isEmpty) return results;
+  final grouped = <String, List<SelectionOption>>{};
+  for (final opt in results) {
+    final key = normalizeTitle(opt.title);
+    grouped.putIfAbsent(key, () => []).add(opt);
+  }
+  return grouped.values.map((group) {
+    if (group.length == 1) return group.first;
+    group.sort((a, b) => extractEpisodeCount(b.label).compareTo(extractEpisodeCount(a.label)));
+    final best = group.first;
+    final bestProviderParts = best.key.split('::');
+    final bestProvider = best.extraData?['provider'] as String? ??
+        (bestProviderParts.length > 1 ? bestProviderParts.first : null);
+    final mergedFrom = group.map((o) {
+      final p = o.extraData?['provider'] as String?;
+      if (p != null) return p;
+      final parts = o.key.split('::');
+      return parts.length > 1 ? parts.first : null;
+    }).where((p) => p != null).toList();
+    final mergedExtra = <String, dynamic>{
+      ...?best.extraData,
+      'merged_from': mergedFrom,
+    };
+    if (bestProvider != null) mergedExtra['provider'] = bestProvider;
+    return SelectionOption(
+      key: best.key,
+      label: best.label,
+      title: best.title,
+      thumbnail: best.thumbnail,
+      extraData: mergedExtra,
+    );
+  }).toList();
+}

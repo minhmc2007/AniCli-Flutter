@@ -1,4 +1,5 @@
 # Miscellaneous
+/tmp/
 *.class
 *.lock
 *.log

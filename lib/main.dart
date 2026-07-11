@@ -10,6 +10,7 @@ import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
@@ -19,6 +20,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:animeclient/api/providers/hls_proxy.dart';
+import 'package:animeclient/api/providers/ytdl_proxy.dart';
 import 'package:open_file/open_file.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
@@ -29,8 +31,8 @@ import 'package:url_launcher/url_launcher.dart';
 import 'i18n.dart';
 
 // Global Definitions & App State
-const String kAppVersion = "1.8.10";
-const String kBuildNumber = "1810";
+const String kAppVersion = "1.9.0 Developer Preview";
+const String kBuildNumber = "190";
 const kColorCream = Color(0xFFFEEAC9);
 const kColorPeach = Color(0xFFFFCDC9);
 const kColorSoftPink = Color(0xFFFDACAC);
@@ -61,13 +63,13 @@ class AniCliApp extends StatelessWidget {
     return MaterialApp(
       title: 'AniCli Flutter',
       debugShowCheckedModeBanner: false,
-      locale: context.watch<SettingsProvider>().locale == AppLocale.vi ? const Locale('vi', 'VN') : null,
+      locale: context.watch<SettingsProvider>().locale == AppLocale.vi ? const Locale('vi') : null,
       localizationsDelegates: const [
-        DefaultMaterialLocalizations.delegate,
-        DefaultCupertinoLocalizations.delegate,
+        GlobalMaterialLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
         DefaultWidgetsLocalizations.delegate,
       ],
-      supportedLocales: const [Locale('en', 'US'), Locale('vi', 'VN')],
+      supportedLocales: const [Locale('en', 'US'), Locale('vi')],
       theme: ThemeData(
         brightness: Brightness.light,
         scaffoldBackgroundColor: kColorCream,
@@ -317,15 +319,15 @@ class UpdaterService {
 
   static Future<void> checkAndUpdate(BuildContext context) async {
     try {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Checking for updates...")));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(context.tr('updater_checking'))));
       final res = await http.get(Uri.parse(_releaseUrl));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body); String rem = data['tag_name'];
         if (_isNewer(_extractSemVer(kAppVersion) ?? "", _extractSemVer(rem) ?? "") && context.mounted) {
           _showDialog(context, rem, data['body'], data['assets']);
-        } else if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("You are up to date! ($kAppVersion)"), backgroundColor: Colors.green));
+        } else if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(context.tr('updater_up_to_date', [kAppVersion])), backgroundColor: Colors.green));
       }
-    } catch (e) { if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Update check failed: $e"), backgroundColor: kColorCoral)); }
+    } catch (e) { if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(context.tr('updater_check_failed', [e.toString()])), backgroundColor: kColorCoral)); }
   }
 
   static Future<void> checkSilent(BuildContext context) async {
@@ -334,7 +336,7 @@ class UpdaterService {
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body); String rem = data['tag_name'];
         if (_isNewer(_extractSemVer(kAppVersion) ?? "", _extractSemVer(rem) ?? "") && context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("New Update Available: $rem"), backgroundColor: kColorCoral, duration: const Duration(seconds: 10), action: SnackBarAction(label: "Update", textColor: Colors.white, onPressed: () => _showDialog(context, rem, data['body'], data['assets']))));
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(context.tr('updater_available', [rem])), backgroundColor: kColorCoral, duration: const Duration(seconds: 10), action: SnackBarAction(label: context.tr('updater_update'), textColor: Colors.white, onPressed: () => _showDialog(context, rem, data['body'], data['assets']))));
         }
       }
     } catch (_) {}
@@ -342,7 +344,7 @@ class UpdaterService {
 
   static void _showDialog(BuildContext context, String ver, String notes, List assets) {
     showGeneralDialog(
-      context: context, barrierDismissible: true, barrierLabel: "Dismiss", barrierColor: Colors.black.withOpacity(0.6), transitionDuration: const Duration(milliseconds: 400),
+      context: context, barrierDismissible: true, barrierLabel: context.tr('updater_dismiss'), barrierColor: Colors.black.withOpacity(0.6), transitionDuration: const Duration(milliseconds: 400),
       transitionBuilder: (ctx, a1, a2, child) => Transform.scale(scale: Curves.easeOutBack.transform(a1.value).clamp(0.0, 1.0), child: Opacity(opacity: a1.value.clamp(0.0, 1.0), child: child)),
       pageBuilder: (ctx, a1, a2) => Center(child: Material(color: Colors.transparent, child: Container(
         width: MediaQuery.of(context).size.width * 0.85, constraints: const BoxConstraints(maxWidth: 500, maxHeight: 600), padding: const EdgeInsets.all(24),
@@ -351,14 +353,14 @@ class UpdaterService {
           Row(children:[
             Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: kColorCoral.withOpacity(0.1), shape: BoxShape.circle), child: const Icon(LucideIcons.sparkles, color: kColorCoral, size: 24)),
             const SizedBox(width: 15),
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children:[Text("New Version Available", style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.bold, color: kColorDarkText)), Text(ver, style: GoogleFonts.inter(fontSize: 14, color: kColorCoral, fontWeight: FontWeight.bold))])),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children:[Text(context.tr('updater_new_version'), style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.bold, color: kColorDarkText)), Text(ver, style: GoogleFonts.inter(fontSize: 14, color: kColorCoral, fontWeight: FontWeight.bold))])),
           ]).animate().slideY(begin: -0.2, end: 0, duration: 400.ms).fadeIn(),
           const SizedBox(height: 20), Divider(color: Colors.grey.withOpacity(0.2)), const SizedBox(height: 10),
           Flexible(child: SingleChildScrollView(physics: const BouncingScrollPhysics(), child: MarkdownBody(data: notes, styleSheet: MarkdownStyleSheet(p: GoogleFonts.inter(color: kColorDarkText, fontSize: 14), h1: GoogleFonts.inter(color: kColorDarkText, fontWeight: FontWeight.bold, fontSize: 20), h2: GoogleFonts.inter(color: kColorDarkText, fontWeight: FontWeight.bold, fontSize: 18), h3: GoogleFonts.inter(color: kColorDarkText, fontWeight: FontWeight.bold, fontSize: 16), listBullet: GoogleFonts.inter(color: kColorCoral), strong: GoogleFonts.inter(fontWeight: FontWeight.bold, color: kColorCoral), code: GoogleFonts.jetBrainsMono(backgroundColor: Colors.grey.shade100, color: kColorDarkText))))).animate(delay: 200.ms).fadeIn().slideX(begin: 0.1, end: 0),
           const SizedBox(height: 20),
           Row(mainAxisAlignment: MainAxisAlignment.end, children:[
-            TextButton(onPressed: () => Navigator.pop(ctx), child: Text("Later", style: GoogleFonts.inter(color: Colors.black54, fontWeight: FontWeight.w600))), const SizedBox(width: 10),
-            ElevatedButton.icon(style: ElevatedButton.styleFrom(backgroundColor: kColorCoral, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)), padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12), elevation: 0), onPressed: () { Navigator.pop(ctx); _performUpdate(context, assets, ver); }, icon: const Icon(LucideIcons.downloadCloud, size: 18), label: Text("Update Now", style: GoogleFonts.inter(fontWeight: FontWeight.bold))),
+            TextButton(onPressed: () => Navigator.pop(ctx), child: Text(context.tr('updater_later'), style: GoogleFonts.inter(color: Colors.black54, fontWeight: FontWeight.w600))), const SizedBox(width: 10),
+            ElevatedButton.icon(style: ElevatedButton.styleFrom(backgroundColor: kColorCoral, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)), padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12), elevation: 0), onPressed: () { Navigator.pop(ctx); _performUpdate(context, assets, ver); }, icon: const Icon(LucideIcons.downloadCloud, size: 18), label: Text(context.tr('updater_update_now'), style: GoogleFonts.inter(fontWeight: FontWeight.bold))),
           ]).animate(delay: 400.ms).fadeIn().slideY(begin: 0.2, end: 0),
         ])))));
   }
@@ -373,7 +375,7 @@ class UpdaterService {
       if (!status.isGranted) {
         final res = await Permission.requestInstallPackages.request();
         if (!res.isGranted && context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: const Text("Allow 'Install unknown apps' in Settings to update."), backgroundColor: kColorCoral, action: SnackBarAction(label: "Settings", textColor: Colors.white, onPressed: () => openAppSettings())));
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(context.tr('updater_allow_install')), backgroundColor: kColorCoral, action: SnackBarAction(label: context.tr('updater_settings'), textColor: Colors.white, onPressed: () => openAppSettings())));
           return;
         }
       }
@@ -393,7 +395,7 @@ class UpdaterService {
       }
     } else if (Platform.isLinux) {
       if (exe.startsWith('/usr/') || exe.startsWith('/opt/')) {
-        if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("App managed by package manager. Please update via system.")));
+        if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(context.tr('updater_package_manager'))));
         return;
       }
       if (exe.endsWith('.appimage')) {
@@ -409,30 +411,30 @@ class UpdaterService {
     }
 
     if (url == null) {
-      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("No compatible asset found.")));
+      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(context.tr('updater_no_asset'))));
       return;
     }
 
     if (!context.mounted) return;
     final file = await showDialog<File?>(
       context: context, barrierDismissible: false,
-      builder: (ctx) => GenericDownloadDialog(url: url!, fileName: fn!, title: "Updating App", icon: LucideIcons.download, isUpdate: true),
+      builder: (ctx) => GenericDownloadDialog(url: url!, fileName: fn!, title: context.tr('updater_downloading_title'), icon: LucideIcons.download, isUpdate: true),
     );
 
     if (file != null && context.mounted) {
       if (Platform.isAndroid) {
         if (!await file.exists() && context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("APK removed by Play Protect. Disable temporarily and try again."), backgroundColor: kColorCoral));
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(context.tr('updater_apk_removed')), backgroundColor: kColorCoral));
           return;
         }
         final res = await OpenFile.open(file.path, type: "application/vnd.android.package-archive");
-        if (res.type != ResultType.done && context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Install Error: ${res.message}"), backgroundColor: kColorCoral));
+        if (res.type != ResultType.done && context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(context.tr('updater_install_error', [res.message])), backgroundColor: kColorCoral));
       } else if (Platform.isWindows && runSetup) {
         await Process.start(file.path,[], mode: ProcessStartMode.detached);
         exit(0);
       } else {
         await launchUrl(Uri.directory(file.parent.path));
-        if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Downloaded to Downloads folder."), duration: Duration(seconds: 5)));
+        if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(context.tr('updater_downloaded')), duration: Duration(seconds: 5)));
       }
     }
   }
@@ -444,8 +446,8 @@ class GenericDownloadDialog extends StatefulWidget {
   @override State<GenericDownloadDialog> createState() => _GenericDownloadDialogState();
 }
 class _GenericDownloadDialogState extends State<GenericDownloadDialog> {
-  double _prog = 0.0; String _status = "Starting...", _sizeInfo = ""; final http.Client _client = http.Client();
-  @override void initState() { super.initState(); _start(); }
+  double _prog = 0.0; String _status = "", _sizeInfo = ""; final http.Client _client = http.Client();
+  @override void initState() { super.initState(); _status = context.tr('download_starting'); _start(); }
   @override void dispose() { _client.close(); super.dispose(); }
 
   Future<void> _start() async {
@@ -469,12 +471,12 @@ class _GenericDownloadDialogState extends State<GenericDownloadDialog> {
       final total = res.contentLength ?? 0; int rec = 0; final bytes = <int>[];
       res.stream.listen((b) {
         bytes.addAll(b); rec += b.length;
-        setState(() { _prog = total > 0 ? rec / total : 0; _status = "Downloading..."; _sizeInfo = "${(rec/1024/1024).toStringAsFixed(1)} MB" + (total > 0 ? " / ${(total/1024/1024).toStringAsFixed(1)} MB" : ""); });
+        setState(() { _prog = total > 0 ? rec / total : 0; _status = context.tr('download_downloading'); _sizeInfo = "${(rec/1024/1024).toStringAsFixed(1)} MB" + (total > 0 ? " / ${(total/1024/1024).toStringAsFixed(1)} MB" : ""); });
       }, onDone: () async {
         await file.writeAsBytes(bytes);
-        if (mounted) { Navigator.pop(context, widget.isUpdate ? file : null); if (!widget.isUpdate) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Saved to: ${file.path}"), backgroundColor: Colors.green)); }
-      }, onError: (e) { if (mounted) { Navigator.pop(context); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e"))); } });
-    } catch (e) { if (mounted) { Navigator.pop(context); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Failed: $e"), backgroundColor: kColorCoral)); } }
+        if (mounted) { Navigator.pop(context, widget.isUpdate ? file : null); if (!widget.isUpdate) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(context.tr('download_saved', [file.path])), backgroundColor: Colors.green)); }
+      }, onError: (e) { if (mounted) { Navigator.pop(context); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(context.tr('download_error', [e.toString()])))); } });
+    } catch (e) { if (mounted) { Navigator.pop(context); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(context.tr('download_failed_snack', [e.toString()])), backgroundColor: kColorCoral)); } }
   }
 
   @override Widget build(BuildContext context) => PopScope(canPop: false, child: Center(child: Material(color: Colors.transparent, child: Container(
@@ -484,7 +486,7 @@ class _GenericDownloadDialogState extends State<GenericDownloadDialog> {
       Container(padding: const EdgeInsets.all(16), decoration: BoxDecoration(color: kColorCoral.withOpacity(0.1), shape: BoxShape.circle), child: Icon(widget.icon, color: kColorCoral, size: 32).animate(onPlay: (c) => c.repeat()).shimmer(duration: 1500.ms, color: Colors.white).scale(begin: const Offset(1,1), end: const Offset(1.1,1.1), duration: 1000.ms, curve: Curves.easeInOut).then().scale(begin: const Offset(1.1,1.1), end: const Offset(1,1), curve: Curves.easeInOut)),
       const SizedBox(height: 20), Text(widget.title, style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.bold, color: kColorDarkText)), const SizedBox(height: 5), Text(widget.fileName, maxLines: 1, overflow: TextOverflow.ellipsis, style: GoogleFonts.inter(fontSize: 13, color: Colors.black54)), const SizedBox(height: 5), Text(_status, style: GoogleFonts.inter(fontSize: 14, color: kColorDarkText)), const SizedBox(height: 20),
       TweenAnimationBuilder<double>(tween: Tween(begin: 0, end: _prog), duration: const Duration(milliseconds: 200), builder: (ctx, val, _) => Column(children:[ClipRRect(borderRadius: BorderRadius.circular(10), child: LinearProgressIndicator(value: val > 0 ? val : null, backgroundColor: Colors.grey.shade200, valueColor: const AlwaysStoppedAnimation<Color>(kColorCoral), minHeight: 8)), const SizedBox(height: 10), Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children:[Text("${(val * 100).toInt()}%", style: GoogleFonts.jetBrainsMono(fontWeight: FontWeight.bold, color: kColorCoral)), Text(_sizeInfo, style: GoogleFonts.inter(fontSize: 12, color: Colors.black45))])])),
-      const SizedBox(height: 25), SizedBox(width: double.infinity, child: OutlinedButton(style: OutlinedButton.styleFrom(side: const BorderSide(color: kColorCoral), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), foregroundColor: kColorCoral), onPressed: () { _client.close(); Navigator.pop(context); }, child: const Text("Cancel")))
+      const SizedBox(height: 25), SizedBox(width: double.infinity, child: OutlinedButton(style: OutlinedButton.styleFrom(side: const BorderSide(color: kColorCoral), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), foregroundColor: kColorCoral), onPressed: () { _client.close(); Navigator.pop(context); }, child: Text(context.tr('download_cancel'))))
     ])
   ))).animate().fadeIn().scale(curve: Curves.easeOutBack));
 }
@@ -499,20 +501,34 @@ class LiquidGlassContainer extends StatelessWidget {
     if (tier == PerformanceTier.low) {
       return Container(decoration: BoxDecoration(color: Colors.white.withOpacity(0.9), borderRadius: br, border: border ?? Border.all(color: Colors.black12, width: 1)), child: child);
     }
-    final o = useBlur && tier == PerformanceTier.high ? opacity * 0.55 : opacity;
+    final isBlurHigh = useBlur && tier == PerformanceTier.high;
+    final o = isBlurHigh ? opacity * 0.55 : opacity;
     final body = ClipRRect(
       borderRadius: br,
       child: DecoratedBox(
         decoration: BoxDecoration(
           border: border ?? Border.all(color: Colors.white.withOpacity(tier == PerformanceTier.high ? 0.5 : 0.3), width: 1.5),
-          color: Colors.white.withOpacity(o),
+          color: tier == PerformanceTier.high ? Colors.white.withOpacity(0.5) : Colors.white.withOpacity(o),
         ),
         child: child,
       ),
     );
     if (useBlur && tier == PerformanceTier.high) {
-      final b = (blur * 0.5).clamp(2.0, 15.0);
-      return ClipRRect(borderRadius: br, child: BackdropFilter(filter: ImageFilter.blur(sigmaX: b, sigmaY: b), child: body));
+      const double ds = 0.5;
+      final b = (blur * 0.5 * ds).clamp(2.0, 15.0);
+      return ClipRRect(
+        borderRadius: br,
+        child: BackdropFilter(
+          filter: ImageFilter.compose(
+            outer: ImageFilter.matrix(Matrix4.diagonal3Values(1.0 / ds, 1.0 / ds, 1.0).storage),
+            inner: ImageFilter.compose(
+              outer: ImageFilter.blur(sigmaX: b, sigmaY: b),
+              inner: ImageFilter.matrix(Matrix4.diagonal3Values(ds, ds, 1.0).storage),
+            ),
+          ),
+          child: body,
+        ),
+      );
     }
     return body;
   }
@@ -548,7 +564,7 @@ class _CozyHeroImageState extends State<CozyHeroImage> {
     return Hero(tag: widget.heroTag, child: Material(color: Colors.transparent, child: Container(
       decoration: BoxDecoration(borderRadius: BorderRadius.circular(widget.radius), boxShadow: (widget.withShadow && context.select<SettingsProvider, PerformanceTier>((p) => p.tier) != PerformanceTier.low) ?[BoxShadow(color: kColorCoral.withOpacity(0.3), blurRadius: 15, offset: const Offset(0, 8))] :[]),
       child: ClipRRect(borderRadius: BorderRadius.circular(widget.radius), child: CachedNetworkImage(
-        imageUrl: _displayUrl!, fit: widget.boxFit, httpHeaders: _getHeaders(_displayUrl!),
+        imageUrl: _displayUrl!, fit: widget.boxFit, memCacheHeight: 600, httpHeaders: _getHeaders(_displayUrl!),
         placeholder: (_,__) => Container(color: kColorPeach),
         errorWidget: (ctx, url, err) {
           if (!_fallbackTried) {
@@ -589,7 +605,18 @@ class _LiveGradientBackgroundState extends State<LiveGradientBackground> with Si
   @override void dispose() { _c.dispose(); super.dispose(); }
   @override Widget build(BuildContext context) => Stack(children:[
     AnimatedBuilder(animation: _c, builder: (ctx, _) => Container(width: double.infinity, height: double.infinity, decoration: BoxDecoration(gradient: LinearGradient(colors: const[kColorCream, kColorPeach], begin: _tA.value, end: _bA.value)))),
-    RepaintBoundary(child: widget.child),
+    NotificationListener<ScrollNotification>(
+      onNotification: (notif) {
+        if (notif is ScrollStartNotification) {
+          _c.stop();
+        } else if (notif is ScrollEndNotification) {
+          final t = context.read<SettingsProvider>().tier;
+          if (t != PerformanceTier.low) _c.repeat(reverse: true);
+        }
+        return false;
+      },
+      child: RepaintBoundary(child: widget.child),
+    ),
   ]);
 }
 
@@ -601,19 +628,21 @@ class FloatingOrbsBackground extends StatelessWidget {
     if (tier == PerformanceTier.low) return Container(color: Colors.transparent);
     final blurSigma = tier == PerformanceTier.high ? 25.0 : 15.0;
     final animate = tier == PerformanceTier.high;
-    return Stack(children:[
-      if (animate)
-        Positioned(top: -100, right: -100, child: _orb(400, kColorPeach).animate(onPlay: (c) => c.repeat(reverse: true)).scale(begin: const Offset(1,1), end: const Offset(1.2,1.2), duration: 6.seconds).rotate(begin: 0, end: 0.1, duration: 8.seconds))
-      else
-        Positioned(top: -100, right: -100, child: _orb(300, kColorPeach.withOpacity(0.6))),
-      if (animate)
-        Positioned(bottom: -150, left: -100, child: _orb(450, kColorCoral.withOpacity(0.4)).animate(onPlay: (c) => c.repeat(reverse: true)).scale(begin: const Offset(1,1), end: const Offset(1.3,1.3), duration: 7.seconds).move(begin: Offset.zero, end: const Offset(20,-20), duration: 5.seconds))
-      else
-        Positioned(bottom: -100, left: -80, child: _orb(300, kColorCoral.withOpacity(0.25))),
-      if (animate)
-        Align(alignment: const Alignment(0, -0.3), child: _orb(300, kColorSoftPink.withOpacity(0.3)).animate(onPlay: (c) => c.repeat(reverse: true)).scale(begin: const Offset(0.8,0.8), end: const Offset(1.1,1.1), duration: 5.seconds).fadeIn()),
-      Positioned.fill(child: BackdropFilter(filter: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma), child: Container(color: Colors.transparent))),
-    ]);
+    return ImageFiltered(
+      imageFilter: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
+      child: Stack(children:[
+        if (animate)
+          Positioned(top: -100, right: -100, child: _orb(400, kColorPeach).animate(onPlay: (c) => c.repeat(reverse: true)).scale(begin: const Offset(1,1), end: const Offset(1.2,1.2), duration: 6.seconds).rotate(begin: 0, end: 0.1, duration: 8.seconds))
+        else
+          Positioned(top: -100, right: -100, child: _orb(300, kColorPeach.withOpacity(0.6))),
+        if (animate)
+          Positioned(bottom: -150, left: -100, child: _orb(450, kColorCoral.withOpacity(0.4)).animate(onPlay: (c) => c.repeat(reverse: true)).scale(begin: const Offset(1,1), end: const Offset(1.3,1.3), duration: 7.seconds).move(begin: Offset.zero, end: const Offset(20,-20), duration: 5.seconds))
+        else
+          Positioned(bottom: -100, left: -80, child: _orb(300, kColorCoral.withOpacity(0.25))),
+        if (animate)
+          Align(alignment: const Alignment(0, -0.3), child: _orb(300, kColorSoftPink.withOpacity(0.3)).animate(onPlay: (c) => c.repeat(reverse: true)).scale(begin: const Offset(0.8,0.8), end: const Offset(1.1,1.1), duration: 5.seconds).fadeIn()),
+      ]),
+    );
   }
 }
 
@@ -633,11 +662,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     Center(child: AnimatedSwitcher(duration: const Duration(milliseconds: 800), switchInCurve: Curves.easeOutBack, switchOutCurve: Curves.easeInBack, child: _isFinished ? _buildLoader() : _buildWelcome())),
   ])));
   Widget _buildLoader() => Column(key: const ValueKey("setup"), mainAxisSize: MainAxisSize.min, mainAxisAlignment: MainAxisAlignment.center, children:[
-    SizedBox(width: 60, height: 60, child: CircularProgressIndicator(strokeWidth: 5, valueColor: const AlwaysStoppedAnimation(kColorCoral), backgroundColor: kColorPeach.withOpacity(0.5))), const SizedBox(height: 30), Text("Getting things ready...", style: GoogleFonts.inter(fontSize: 22, color: kColorDarkText, fontWeight: FontWeight.w600)).animate().fadeIn(duration: 600.ms).slideY(begin: 0.2, end: 0)
+    SizedBox(width: 60, height: 60, child: CircularProgressIndicator(strokeWidth: 5, valueColor: const AlwaysStoppedAnimation(kColorCoral), backgroundColor: kColorPeach.withOpacity(0.5))), const SizedBox(height: 30), Text(context.tr('welcome_loading'), style: GoogleFonts.inter(fontSize: 22, color: kColorDarkText, fontWeight: FontWeight.w600)).animate().fadeIn(duration: 600.ms).slideY(begin: 0.2, end: 0)
   ]);
   Widget _buildWelcome() => Column(key: const ValueKey("welcome"), mainAxisSize: MainAxisSize.min, mainAxisAlignment: MainAxisAlignment.center, children:[
     SizedBox(height: 100, child: AnimatedSwitcher(duration: const Duration(milliseconds: 600), transitionBuilder: (c, a) => FadeTransition(opacity: a, child: SlideTransition(position: Tween<Offset>(begin: const Offset(0, 0.5), end: Offset.zero).animate(CurvedAnimation(parent: a, curve: Curves.easeOutBack)), child: c)), child: Text(_greetings[_idx], key: ValueKey(_idx), textAlign: TextAlign.center, style: GoogleFonts.outfit(fontSize: 56, fontWeight: FontWeight.w800, color: kColorDarkText, height: 1.0, letterSpacing: -1.5)))), const SizedBox(height: 50),
-    AnimatedOpacity(opacity: _idx == _greetings.length - 1 ? 1.0 : 0.0, duration: const Duration(milliseconds: 800), child: AnimatedContainer(duration: const Duration(milliseconds: 300), curve: Curves.easeOut, transform: Matrix4.identity()..scale(_idx == _greetings.length - 1 ? 1.0 : 0.9), child: Container(decoration: BoxDecoration(borderRadius: BorderRadius.circular(30), boxShadow:[BoxShadow(color: kColorCoral.withOpacity(0.4), blurRadius: 20, offset: const Offset(0, 10), spreadRadius: 2)]), child: ElevatedButton(onPressed: _idx == _greetings.length - 1 ? _complete : null, style: ElevatedButton.styleFrom(backgroundColor: kColorCoral, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 45, vertical: 22), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)), elevation: 0), child: Row(mainAxisSize: MainAxisSize.min, children:[Text("Get Started", style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.bold)), const SizedBox(width: 8), const Icon(LucideIcons.arrowRight, size: 20)])))))
+    AnimatedOpacity(opacity: _idx == _greetings.length - 1 ? 1.0 : 0.0, duration: const Duration(milliseconds: 800), child: AnimatedContainer(duration: const Duration(milliseconds: 300), curve: Curves.easeOut, transform: Matrix4.identity()..scale(_idx == _greetings.length - 1 ? 1.0 : 0.9), child: Container(decoration: BoxDecoration(borderRadius: BorderRadius.circular(30), boxShadow:[BoxShadow(color: kColorCoral.withOpacity(0.4), blurRadius: 20, offset: const Offset(0, 10), spreadRadius: 2)]), child: ElevatedButton(onPressed: _idx == _greetings.length - 1 ? _complete : null, style: ElevatedButton.styleFrom(backgroundColor: kColorCoral, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 45, vertical: 22), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)), elevation: 0), child: Row(mainAxisSize: MainAxisSize.min, children:[Text(context.tr('welcome_get_started'), style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.bold)), const SizedBox(width: 8), const Icon(LucideIcons.arrowRight, size: 20)])))))
   ]);
 }
 
@@ -654,9 +683,9 @@ Future<void> _go(BuildContext context, AnimeSource source) async {
 }
 @override Widget build(BuildContext context) => Scaffold(body: Container(decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors:[Color(0xFFFFF8F0), kColorCream])), child: Stack(fit: StackFit.expand, children:[
   const FloatingOrbsBackground(), SafeArea(child: Center(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 32), child: Column(mainAxisSize: MainAxisSize.min, children:[
-    Text("Choose Anime Source", style: GoogleFonts.outfit(fontSize: 32, fontWeight: FontWeight.bold, color: kColorDarkText)), const SizedBox(height: 12), Text("Select your preferred anime content language", style: GoogleFonts.inter(fontSize: 16, color: kColorDarkText.withOpacity(0.7))), const SizedBox(height: 40),
-    _SourceOpt(title: "English", subtitle: "Multi-Provider · Senshi · Anipub · Anineko · AllAnime · Animepahe", flag: "🇺🇸", onTap: () => _go(context, AnimeSource.en)), const SizedBox(height: 16),
-    _SourceOpt(title: "Tiếng Việt", subtitle: "PhimAPI · Vietsub", flag: "🇻🇳", onTap: () => _go(context, AnimeSource.vi)),
+    Text(context.tr('choose_source'), style: GoogleFonts.outfit(fontSize: 32, fontWeight: FontWeight.bold, color: kColorDarkText)), const SizedBox(height: 12), Text(context.tr('choose_source_sub'), style: GoogleFonts.inter(fontSize: 16, color: kColorDarkText.withOpacity(0.7))), const SizedBox(height: 40),
+    _SourceOpt(title: context.tr('source_en_title'), subtitle: context.tr('source_en_sub'), flag: "🇺🇸", onTap: () => _go(context, AnimeSource.en)), const SizedBox(height: 16),
+    _SourceOpt(title: context.tr('source_vi_title'), subtitle: context.tr('source_vi_sub'), flag: "🇻🇳", onTap: () => _go(context, AnimeSource.vi)),
   ])))),
 ])));
 }
@@ -694,10 +723,10 @@ class _MainScreenState extends State<MainScreen> {
       case 2: activePage = FavoritesView(key: _fKey, onAnimeTap: _openDetail, onContinueAnime: _continueAnime); activeKey = const ValueKey("FavTab"); break;
       default: activePage = SettingsView(key: _sKey); activeKey = const ValueKey("SettingsTab"); break;
     }
-    final tier = context.watch<SettingsProvider>().tier;
+    final tier = context.select<SettingsProvider, PerformanceTier>((p) => p.tier);
     return Scaffold(body: LiveGradientBackground(child: Stack(fit: StackFit.expand, children:[
       AnimatedSwitcher(duration: tier == PerformanceTier.low ? Duration.zero : const Duration(milliseconds: 500), switchInCurve: Curves.easeOutQuart, switchOutCurve: Curves.easeInQuart, transitionBuilder: (child, animation) => tier == PerformanceTier.low ? child : FadeTransition(opacity: animation, child: tier == PerformanceTier.high ? SlideTransition(position: Tween<Offset>(begin: const Offset(0.05, 0), end: Offset.zero).animate(animation), child: child) : child), child: KeyedSubtree(key: activeKey, child: activePage)),
-      Positioned(bottom: 30, left: 0, right: 0, child: Center(child: GlassDock(selectedIndex: _idx, onItemSelected: (i) => setState(() => _idx = i)))),
+      Positioned(bottom: 30, left: 0, right: 0, child: Center(child: RepaintBoundary(child: GlassDock(selectedIndex: _idx, onItemSelected: (i) => setState(() => _idx = i))))),
     ])));
   }
 }
@@ -838,13 +867,13 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
       }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Chapter downloaded for offline reading")),
+          SnackBar(content: Text(context.tr('chapter_downloaded'))),
         );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Download failed: $e")),
+          SnackBar(content: Text(context.tr('download_failed', [e.toString()]))),
         );
       }
     } finally {
@@ -860,7 +889,7 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
       await dir.delete(recursive: true);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Downloaded chapter deleted")),
+          SnackBar(content: Text(context.tr('downloaded_deleted'))),
         );
       }
     }
@@ -944,9 +973,7 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
                                           _nav(widget.allChapters[idx + 1]),
                                       style: ElevatedButton.styleFrom(
                                           backgroundColor: Colors.grey[800]),
-                                      child: const Text("Previous Chapter",
-                                          style: TextStyle(
-                                              color: Colors.white)),
+                                      child: Text(context.tr('previous_chapter'), style: const TextStyle(color: Colors.white)),
                                     ),
                                   if (idx > 0)
                                     ElevatedButton(
@@ -954,9 +981,7 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
                                           _nav(widget.allChapters[idx - 1]),
                                       style: ElevatedButton.styleFrom(
                                           backgroundColor: kColorCoral),
-                                      child: const Text("Next Chapter",
-                                          style: TextStyle(
-                                              color: Colors.white)),
+                                      child: Text(context.tr('next_chapter'), style: const TextStyle(color: Colors.white)),
                                     ),
                                 ],
                               ),
@@ -965,26 +990,34 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
                           return Container(
                             alignment: Alignment.center,
                             color: Colors.black,
-                            child: CachedNetworkImage(
-                              imageUrl: _pages[i],
-                              fit: BoxFit.contain,
-                              width: double.infinity,
-                              placeholder: (_, __) => const SizedBox(
-                                height: 300,
-                                child: Center(
-                                  child: CircularProgressIndicator(
-                                      color: kColorCoral, strokeWidth: 2),
-                                ),
-                              ),
-                              errorWidget: (_, __, ___) => const SizedBox(
-                                height: 200,
-                                child: Center(
-                                  child: Icon(Icons.broken_image,
-                                      color: Colors.white54),
-                                ),
-                              ),
-                              httpHeaders: headers,
-                            ),
+                            child: _pages[i].contains('://')
+                                ? CachedNetworkImage(
+                                    imageUrl: _pages[i],
+                                    fit: BoxFit.contain,
+                                    width: double.infinity,
+                                    memCacheHeight: 1200,
+                                    placeholder: (_, __) => const SizedBox(
+                                      height: 300,
+                                      child: Center(
+                                        child: CircularProgressIndicator(
+                                            color: kColorCoral,
+                                            strokeWidth: 2),
+                                      ),
+                                    ),
+                                    errorWidget: (_, __, ___) => const SizedBox(
+                                      height: 200,
+                                      child: Center(
+                                        child: Icon(Icons.broken_image,
+                                            color: Colors.white54),
+                                      ),
+                                    ),
+                                    httpHeaders: headers,
+                                  )
+                                : Image.file(
+                                    File(_pages[i]),
+                                    fit: BoxFit.contain,
+                                    width: double.infinity,
+                                  ),
                           );
                         },
                       ),
@@ -1015,7 +1048,7 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
                                 color: Colors.white,
                                 fontWeight: FontWeight.bold),
                             maxLines: 1),
-                        Text("Chapter $displayChap",
+                        Text(context.tr('chapter_prefix', [displayChap]),
                             style: const TextStyle(
                                 color: kColorCoral, fontSize: 12)),
                       ],
@@ -1062,20 +1095,87 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
 
 const String _kPlayerUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
+class StreamEntry {
+  final String url;
+  final String referer;
+  final Map<String, String> extraHeaders;
+  StreamEntry(this.url, {this.referer = '', Map<String, String>? extraHeaders}) : extraHeaders = extraHeaders ?? const {};
+}
+
 class InternalPlayerScreen extends StatefulWidget {
-  final String streamUrl, title, animeId, epNum, referer;
-  final Map<String, String>? extraHeaders;
-  const InternalPlayerScreen({super.key, required this.streamUrl, required this.title, required this.animeId, required this.epNum, this.referer='', this.extraHeaders});
+  final String title, animeId, epNum;
+  final List<StreamEntry> urls;
+  const InternalPlayerScreen({super.key, required this.urls, required this.title, required this.animeId, required this.epNum});
   @override State<InternalPlayerScreen> createState() => _InternalPlayerScreenState();
 }
 class _InternalPlayerScreenState extends State<InternalPlayerScreen> {
   late final Player _p; late final VideoController _c; late ProgressProvider _prog;
   bool _showControls = true, _showFwd = false, _showRwd = false, _resumeChecked = false;
   Timer? _hideT, _progT; StreamSubscription? _durSub;
+  int _urlIndex = 0;
+
+  StreamEntry get _current => widget.urls[_urlIndex];
+
+  bool _needsYtdlp(String url) {
+    // AllAnime embed/CDN URLs need yt-dlp
+    if (url.contains('ok.ru/') ||
+        url.contains('okcdn.ru') ||
+        url.contains('mp4upload.com') ||
+        url.contains('allanime.uns.bio') ||
+        url.contains('bysekoze.com')) return true;
+    // Also proxy if it has embed patterns
+    if (url.contains('/embed') || url.contains('/e/')) return true;
+    return false;
+  }
+
+  Future<String> _resolveUrl(String url, Map<String, String> headers) async {
+    if (!_needsYtdlp(url)) return url;
+    await YtdlProxy.setHeaders(headers);
+    return YtdlProxy.proxyUrl(url);
+  }
+
+  void _tryNextUrl() {
+    if (!mounted) return;
+    _urlIndex++;
+    if (_urlIndex >= widget.urls.length) return;
+    _openCurrent();
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Trying next source...'), duration: const Duration(seconds: 2)));
+  }
+
+  Future<void> _openCurrent() async {
+    final headers = _buildHeaders();
+    final playUrl = await _resolveUrl(_current.url, headers);
+    debugPrint('[DEBUG] InternalPlayer url=$playUrl headers=$headers');
+    _applyHeadersToPlayer(headers);
+    _p.open(Media(playUrl));
+  }
+
+  Map<String, String> _buildHeaders() {
+    final headers = <String, String>{};
+    final ref = _current.referer.isNotEmpty ? _current.referer : AniCore.referer;
+    if (ref.isNotEmpty) headers['Referer'] = ref;
+    if (_current.extraHeaders.isNotEmpty) {
+      headers.addAll(_current.extraHeaders);
+    } else {
+      headers['User-Agent'] = _kPlayerUA;
+    }
+    return headers;
+  }
+
+  void _applyHeadersToPlayer(Map<String, String> headers) {
+    debugPrint('[DEBUG] mpv http-header-fields: $headers');
+    try {
+      final headerStr = headers.entries.map((e) => '${e.key}: ${e.value}').join(', ');
+      (_p.platform as dynamic).setProperty('http-header-fields', headerStr);
+    } catch (e) {
+      debugPrint('[DEBUG] Failed to set http-header-fields: $e');
+    }
+  }
 
   @override void initState() {
     super.initState(); _p = Player(configuration: const PlayerConfiguration(vo: 'gpu'));
     _c = VideoController(_p, configuration: const VideoControllerConfiguration(enableHardwareAcceleration: true, androidAttachSurfaceAfterVideoParameters: true));
+    try { (_p.platform as dynamic).setProperty('ytdl', 'yes'); } catch (_) {}
 
     final cacheSecs = context.read<SettingsProvider>().cacheSecs;
     try {
@@ -1089,29 +1189,12 @@ class _InternalPlayerScreenState extends State<InternalPlayerScreen> {
     } catch (_) {}
 
     _durSub = _p.stream.duration.listen((d) { if (!_resumeChecked && d.inSeconds > 0) { _resumeChecked = true; _checkResume(); } });
-    final headers = <String, String>{};
-    final ref = widget.referer.isNotEmpty ? widget.referer : AniCore.referer;
-    if (ref.isNotEmpty) headers['Referer'] = ref;
-    if (widget.extraHeaders != null) {
-      headers.addAll(widget.extraHeaders!);
-    } else {
-      headers['User-Agent'] = _kPlayerUA;
-    }
-    debugPrint('[DEBUG] InternalPlayer opening: ${widget.streamUrl}');
-    debugPrint('[DEBUG] InternalPlayer headers: $headers');
-    try {
-      final headerStr = headers.entries.map((e) => '${e.key}: ${e.value}').join(', ');
-      debugPrint('[DEBUG] mpv http-header-fields: $headerStr');
-      (_p.platform as dynamic).setProperty('http-header-fields', headerStr);
-    } catch (e) {
-      debugPrint('[DEBUG] Failed to set http-header-fields: $e');
-    }
-    _p.stream.error.listen((e) { debugPrint('[DEBUG] mpv error: $e'); if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Playback error: $e'))); });
+    _openCurrent();
+    _p.stream.error.listen((e) { debugPrint('[DEBUG] mpv error: $e'); _tryNextUrl(); });
     _p.stream.completed.listen((_) => debugPrint('[DEBUG] mpv completed'));
     _p.stream.log.listen((l) { if (l.level == 'error' || l.level == 'warn' || l.level == 'info') debugPrint('[DEBUG] mpv ${l.level}: ${l.text}'); });
     _p.stream.buffering.listen((b) { if (b) debugPrint('[DEBUG] mpv buffering...'); else debugPrint('[DEBUG] mpv done buffering'); });
     _p.stream.position.listen((p) { if (p.inSeconds % 10 == 0) debugPrint('[DEBUG] mpv position: $p'); }, onError: (e) => debugPrint('[DEBUG] mpv position error: $e'));
-    _p.open(Media(widget.streamUrl));
     _progT = Timer.periodic(const Duration(seconds: 5), (_) { if (mounted && _p.state.position.inSeconds > 10) context.read<ProgressProvider>().saveProgress(widget.animeId, widget.epNum, _p.state.position.inSeconds); });
     _p.play(); _p.setVolume(100); _startHide();
   }
@@ -1121,7 +1204,7 @@ class _InternalPlayerScreenState extends State<InternalPlayerScreen> {
     final saved = _prog.getProgress(widget.animeId, widget.epNum);
     if (saved > 10) {
       await _p.pause(); if (!mounted) return;
-      final res = await showDialog<bool>(context: context, barrierDismissible: false, builder: (ctx) => AlertDialog(backgroundColor: kColorCream, title: const Text("Resume?", style: TextStyle(color: kColorCoral, fontWeight: FontWeight.bold)), content: Text("Left off at ${_fmt(Duration(seconds: saved))}. Continue?"), actions:[TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Start Over", style: TextStyle(color: Colors.black54))), ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: kColorCoral, foregroundColor: Colors.white), onPressed: () => Navigator.pop(ctx, true), child: const Text("Resume"))]));
+      final res = await showDialog<bool>(context: context, barrierDismissible: false, builder: (ctx) => AlertDialog(backgroundColor: kColorCream, title: Text(context.tr('resume_title'), style: const TextStyle(color: kColorCoral, fontWeight: FontWeight.bold)), content: Text(context.tr('resume_content', [_fmt(Duration(seconds: saved))])), actions:[TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(context.tr('resume_start_over'), style: const TextStyle(color: Colors.black54))), ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: kColorCoral, foregroundColor: Colors.white), onPressed: () => Navigator.pop(ctx, true), child: Text(context.tr('resume_resume')))]));
       if (mounted && res == true) await _p.seek(Duration(seconds: saved));
       await _p.play();
     }
@@ -1133,7 +1216,7 @@ class _InternalPlayerScreenState extends State<InternalPlayerScreen> {
     setState(() { if (isFwd) _showFwd = true; else _showRwd = true; });
     Future.delayed(const Duration(milliseconds: 600), () { if (mounted) setState(() { _showFwd = false; _showRwd = false; }); });
   }
-  @override void dispose() { _durSub?.cancel(); _progT?.cancel(); _hideT?.cancel(); _p.stop(); try { if (_p.state.position.inSeconds > 10) _prog.saveProgress(widget.animeId, widget.epNum, _p.state.position.inSeconds); } catch (_) {} _p.dispose(); super.dispose(); }
+  @override void dispose() { _durSub?.cancel(); _progT?.cancel(); _hideT?.cancel(); _p.stop(); try { if (_p.state.position.inSeconds > 10) _prog.saveProgress(widget.animeId, widget.epNum, _p.state.position.inSeconds); } catch (_) {} _p.dispose(); YtdlProxy.stop(); super.dispose(); }
   String _fmt(Duration d) => d.inHours > 0 ? '${d.inHours.toString().padLeft(2,'0')}:${(d.inMinutes%60).toString().padLeft(2,'0')}:${(d.inSeconds%60).toString().padLeft(2,'0')}' : '${(d.inMinutes%60).toString().padLeft(2,'0')}:${(d.inSeconds%60).toString().padLeft(2,'0')}';
 
   @override Widget build(BuildContext context) => Scaffold(backgroundColor: Colors.black, body: SafeArea(child: Stack(alignment: Alignment.center, children:[
@@ -1275,13 +1358,11 @@ class _BrowseViewState extends State<BrowseView> with AutomaticKeepAliveClientMi
   @override Widget build(BuildContext context) {
     super.build(context);
     final isMobile = MediaQuery.of(context).size.width < 900;
-    final t = context.watch<SettingsProvider>().tier;
+    final t = context.select<SettingsProvider, PerformanceTier>((p) => p.tier);
     final mangaSrc = context.watch<MangaSourceProvider>().source;
     final isNSFW = context.watch<SourceProvider>().isNSFW;
 
-    String hint = "Search Anime...";
-    if (_isMangaMode) hint = "Search Manga...";
-    else if (isNSFW) hint = "Search Hentai or Category...";
+    String hint = isNSFW ? context.tr('search_hint_nsfw') : _isMangaMode ? context.tr('search_hint_manga') : context.tr('search_hint_anime');
 
     return SingleChildScrollView(
       controller: _scrollController,
@@ -1294,9 +1375,9 @@ class _BrowseViewState extends State<BrowseView> with AutomaticKeepAliveClientMi
             padding: EdgeInsets.symmetric(horizontal: isMobile ? 20 : 40),
             child: Row(
               children:[
-                GestureDetector(onTap: () => _toggleMode(false), child: AnimatedContainer(duration: const Duration(milliseconds: 300), padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10), decoration: BoxDecoration(color: !_isMangaMode ? kColorCoral : Colors.white.withOpacity(0.5), borderRadius: BorderRadius.circular(20), boxShadow: !_isMangaMode ?[BoxShadow(color: kColorCoral.withOpacity(0.4), blurRadius: 10)] :[]), child: Text(isNSFW ? "NSFW 18+" : "Anime", style: GoogleFonts.inter(fontWeight: FontWeight.bold, color: !_isMangaMode ? Colors.white : kColorDarkText.withOpacity(0.6))))),
+                GestureDetector(onTap: () => _toggleMode(false), child: AnimatedContainer(duration: const Duration(milliseconds: 300), padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10), decoration: BoxDecoration(color: !_isMangaMode ? kColorCoral : Colors.white.withOpacity(0.5), borderRadius: BorderRadius.circular(20), boxShadow: !_isMangaMode ?[BoxShadow(color: kColorCoral.withOpacity(0.4), blurRadius: 10)] :[]), child: Text(isNSFW ? context.tr('nsfw_badge') : context.tr('mode_anime'), style: GoogleFonts.inter(fontWeight: FontWeight.bold, color: !_isMangaMode ? Colors.white : kColorDarkText.withOpacity(0.6))))),
                 const SizedBox(width: 15),
-                GestureDetector(onTap: () => _toggleMode(true), child: AnimatedContainer(duration: const Duration(milliseconds: 300), padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10), decoration: BoxDecoration(color: _isMangaMode ? kColorCoral : Colors.white.withOpacity(0.5), borderRadius: BorderRadius.circular(20), boxShadow: _isMangaMode ?[BoxShadow(color: kColorCoral.withOpacity(0.4), blurRadius: 10)] :[]), child: Text("Manga", style: GoogleFonts.inter(fontWeight: FontWeight.bold, color: _isMangaMode ? Colors.white : kColorDarkText.withOpacity(0.6))))),
+                GestureDetector(onTap: () => _toggleMode(true), child: AnimatedContainer(duration: const Duration(milliseconds: 300), padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10), decoration: BoxDecoration(color: _isMangaMode ? kColorCoral : Colors.white.withOpacity(0.5), borderRadius: BorderRadius.circular(20), boxShadow: _isMangaMode ?[BoxShadow(color: kColorCoral.withOpacity(0.4), blurRadius: 10)] :[]), child: Text(context.tr('mode_manga'), style: GoogleFonts.inter(fontWeight: FontWeight.bold, color: _isMangaMode ? Colors.white : kColorDarkText.withOpacity(0.6))))),
               ],
             ),
           ),
@@ -1320,13 +1401,13 @@ class _BrowseViewState extends State<BrowseView> with AutomaticKeepAliveClientMi
                 : KeyedSubtree(
                   key: ValueKey("Grid_$_isMangaMode$_query$_page"),
                   child: _items.isEmpty
-                  ? Center(child: Text("No results found.", style: GoogleFonts.inter(color: Colors.black26)))
+                  ? Center(child: Text(context.tr('no_results'), style: GoogleFonts.inter(color: Colors.black26)))
                   : Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       if (_query.isEmpty && _page == 1) ...[
                         if (!_isMangaMode && _items.length > 5) ...[
-                          Padding(padding: EdgeInsets.only(left: isMobile ? 20 : 40, bottom: 15), child: Text(isNSFW ? "Hot Videos" : "Spotlight", style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.bold, color: kColorCoral))).adapt(t, delay: 200, slideY: true),
+                          Padding(padding: EdgeInsets.only(left: isMobile ? 20 : 40, bottom: 15), child: Text(isNSFW ? context.tr('hot_videos') : context.tr('spotlight'), style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.bold, color: kColorCoral))).adapt(t, delay: 200, slideY: true),
                           FeaturedCarousel(animes: _items.take(5).toList(), onTap: widget.onAnimeTap),
                           const SizedBox(height: 30),
                         ] else if (_isMangaMode) ...[
@@ -1341,11 +1422,11 @@ class _BrowseViewState extends State<BrowseView> with AutomaticKeepAliveClientMi
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     children:[
                                       Text(
-                                        mangaSrc == MangaSource.mangadex ? "MangaDex" : mangaSrc == MangaSource.zettruyen ? "ZetTruyen" : mangaSrc == MangaSource.truyenqq ? "TruyenQQ" : mangaSrc == MangaSource.en ? "EN Manga" : mangaSrc == MangaSource.vi ? "VN Manga" : "WeebCentral",
+                                        mangaSrc == MangaSource.mangadex ? context.tr('manga_mangadex') : mangaSrc == MangaSource.zettruyen ? context.tr('manga_zettruyen') : mangaSrc == MangaSource.truyenqq ? context.tr('manga_truyenqq') : mangaSrc == MangaSource.en ? context.tr('manga_en') : mangaSrc == MangaSource.vi ? context.tr('manga_vi') : context.tr('manga_weebcentral'),
                                         style: GoogleFonts.outfit(fontSize: 40, fontWeight: FontWeight.bold, color: kColorDarkText),
                                       ),
                                       Text(
-                                        mangaSrc == MangaSource.mangadex ? "Read the world's library" : mangaSrc == MangaSource.zettruyen ? "Truyện tranh Tiếng Việt" : mangaSrc == MangaSource.truyenqq ? "Truyện tranh Việt Nam" : mangaSrc == MangaSource.en ? "English Manga" : mangaSrc == MangaSource.vi ? "Vietnamese Manga" : "The Weeb Central",
+                                        mangaSrc == MangaSource.mangadex ? context.tr('manga_mangadex_sub') : mangaSrc == MangaSource.zettruyen ? context.tr('manga_zettruyen_sub') : mangaSrc == MangaSource.truyenqq ? context.tr('manga_truyenqq_sub') : mangaSrc == MangaSource.en ? context.tr('manga_en_sub') : mangaSrc == MangaSource.vi ? context.tr('manga_vi_sub') : context.tr('manga_weebcentral_sub'),
                                         style: GoogleFonts.inter(fontSize: 16, color: kColorDarkText.withOpacity(0.6)),
                                       ),
                                     ],
@@ -1357,7 +1438,7 @@ class _BrowseViewState extends State<BrowseView> with AutomaticKeepAliveClientMi
                            const SizedBox(height: 20),
                         ],
                       ],
-                      Padding(padding: EdgeInsets.only(left: isMobile ? 20 : 40, bottom: 15), child: Text(_query.isEmpty ? (_isMangaMode ? "Popular Updates" : (isNSFW ? "Latest Updates" : "Trending Anime")) : "Results", style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.bold, color: kColorDarkText))).adapt(t, delay: 200, slideY: true),
+                      Padding(padding: EdgeInsets.only(left: isMobile ? 20 : 40, bottom: 15), child: Text(_query.isEmpty ? (_isMangaMode ? context.tr('popular_updates') : (isNSFW ? context.tr('latest_updates') : context.tr('trending_anime'))) : context.tr('results'), style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.bold, color: kColorDarkText))).adapt(t, delay: 200, slideY: true),
                       AnimeGrid(animes: _items, onTap: widget.onAnimeTap, tagPrefix: "browse"),
 
                       if (!_isMangaMode)
@@ -1370,21 +1451,21 @@ class _BrowseViewState extends State<BrowseView> with AutomaticKeepAliveClientMi
                                 ElevatedButton.icon(
                                   onPressed: () => _changePage(-1),
                                   icon: const Icon(LucideIcons.chevronLeft),
-                                  label: const Text("Prev"),
+                                  label: Text(context.tr('prev')),
                                   style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: kColorDarkText),
                                 ),
                                 if (_page > 1) const SizedBox(width: 20),
                                   Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                                     decoration: BoxDecoration(color: kColorCoral, borderRadius: BorderRadius.circular(20)),
-                                    child: Text("Page $_page", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                                    child: Text(context.tr('page', [_page.toString()]), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                                   ),
                                   const SizedBox(width: 20),
                                   if (_items.isNotEmpty)
                                     ElevatedButton.icon(
                                       onPressed: () => _changePage(1),
                                       icon: const Icon(LucideIcons.chevronRight),
-                                      label: const Text("Next"),
+                                      label: Text(context.tr('next')),
                                       style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: kColorDarkText),
                                     ),
                             ],
@@ -1415,7 +1496,7 @@ class _HistoryViewState extends State<HistoryView> with AutomaticKeepAliveClient
     final isNSFW = context.watch<UserProvider>().isNSFW;
     final history = context.watch<UserProvider>().history;
     final isMobile = MediaQuery.of(context).size.width < 900;
-    final t = context.watch<SettingsProvider>().tier;
+    final t = context.select<SettingsProvider, PerformanceTier>((p) => p.tier);
 
     return Column(children:[
       const SizedBox(height: 60),
@@ -1445,7 +1526,7 @@ class _FavoritesViewState extends State<FavoritesView> with AutomaticKeepAliveCl
     final isNSFW = context.watch<UserProvider>().isNSFW;
     final favorites = context.watch<UserProvider>().favorites;
     final history = context.watch<UserProvider>().history;
-    final t = context.watch<SettingsProvider>().tier;
+    final t = context.select<SettingsProvider, PerformanceTier>((p) => p.tier);
 
     final continueMap = <String, VoidCallback>{};
     if (widget.onContinueAnime != null) {
@@ -1473,7 +1554,7 @@ class SettingsView extends StatefulWidget { const SettingsView({super.key}); @ov
 class _SettingsViewState extends State<SettingsView> {
   Future<void> _url(String url) async {
     if (!await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication) && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Could not launch $url"), backgroundColor: kColorCoral));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(context.tr('url_launch_failed', [url])), backgroundColor: kColorCoral));
     }
   }
 
@@ -1487,7 +1568,7 @@ class _SettingsViewState extends State<SettingsView> {
 
   Widget _sw(IconData i, String t, String s, bool v, ValueChanged<bool> o) => LiquidGlassContainer(
     opacity: 0.6,
-    child: SwitchListTile(
+    child: Material(type: MaterialType.transparency, child: SwitchListTile(
       value: v,
       onChanged: o,
       activeColor: kColorCoral,
@@ -1496,7 +1577,7 @@ class _SettingsViewState extends State<SettingsView> {
       subtitle: Text(s, style: GoogleFonts.inter(color: Colors.black54, fontSize: 13)),
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20))
-    )
+    ))
   );
 
   Widget _cd(IconData i, String t, String s, {Widget? tr, VoidCallback? onTap}) => GestureDetector(
@@ -1526,7 +1607,7 @@ class _SettingsViewState extends State<SettingsView> {
     final t = sp.tier;
 
     final items =[
-      _sec("Content"),
+      _sec(context.tr('section_content')),
       LiquidGlassContainer(
         opacity: 0.6,
         child: Padding(
@@ -1534,17 +1615,17 @@ class _SettingsViewState extends State<SettingsView> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children:[
-              Row(children: const[Icon(LucideIcons.globe, color: kColorCoral), SizedBox(width: 10), Text("Anime Source", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16))]),
+              Row(children: [Icon(LucideIcons.globe, color: kColorCoral), const SizedBox(width: 10), Text(context.tr('setting_anime_source'), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16))]),
               const SizedBox(height: 10),
               DropdownButton<AnimeSource>(
                 value: tp.source,
                 isExpanded: true,
                 dropdownColor: kColorCream,
                 underline: Container(height: 1, color: kColorCoral),
-                items: const[
-                  DropdownMenuItem(value: AnimeSource.en, child: Text("English (Multi-Provider)")),
-                  DropdownMenuItem(value: AnimeSource.vi, child: Text("Tiếng Việt (PhimAPI · Vietsub)")),
-                  DropdownMenuItem(value: AnimeSource.hentaivietsub, child: Text("NSFW 18+ (HentaiVietsub)", style: TextStyle(color: kColorCoral, fontWeight: FontWeight.bold))),
+                items: [
+                  DropdownMenuItem(value: AnimeSource.en, child: Text(context.tr('source_en'))),
+                  DropdownMenuItem(value: AnimeSource.vi, child: Text(context.tr('source_vi'))),
+                  DropdownMenuItem(value: AnimeSource.hentaivietsub, child: Text(context.tr('source_nsfw'), style: const TextStyle(color: kColorCoral, fontWeight: FontWeight.bold))),
                 ],
                 onChanged: (v) async {
                   if (v != null) {
@@ -1553,14 +1634,14 @@ class _SettingsViewState extends State<SettingsView> {
                         context: context,
                         builder: (ctx) => AlertDialog(
                           backgroundColor: kColorCream,
-                          title: const Row(children:[Icon(LucideIcons.alertTriangle, color: kColorCoral), SizedBox(width: 10), Text("Age Warning (18+)", style: TextStyle(color: kColorCoral, fontWeight: FontWeight.bold))]),
-                          content: const Text("This source contains adult-only (NSFW) content.\n\nAre you 18 years or older and wish to proceed?"),
+                          title: Row(children:[const Icon(LucideIcons.alertTriangle, color: kColorCoral), const SizedBox(width: 10), Text(context.tr('nsfw_warning_title'), style: const TextStyle(color: kColorCoral, fontWeight: FontWeight.bold))]),
+                          content: Text(context.tr('nsfw_warning_content')),
                           actions:[
-                            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Cancel", style: TextStyle(color: Colors.black54))),
+                            TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(context.tr('cancel'), style: const TextStyle(color: Colors.black54))),
                             ElevatedButton(
                               style: ElevatedButton.styleFrom(backgroundColor: kColorCoral, foregroundColor: Colors.white),
                               onPressed: () => Navigator.pop(ctx, true),
-                              child: const Text("I am 18+"),
+                              child: Text(context.tr('nsfw_warning_confirm')),
                             ),
                           ]
                         )
@@ -1588,20 +1669,20 @@ class _SettingsViewState extends State<SettingsView> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children:[
-              Row(children: const[Icon(LucideIcons.bookOpen, color: kColorCoral), SizedBox(width: 10), Text("Manga Source", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16))]),
+              Row(children: [Icon(LucideIcons.bookOpen, color: kColorCoral), const SizedBox(width: 10), Text(context.tr('setting_manga_source'), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16))]),
               const SizedBox(height: 10),
               DropdownButton<MangaSource>(
                 value: mp.source,
                 isExpanded: true,
                 dropdownColor: kColorCream,
                 underline: Container(height: 1, color: kColorCoral),
-                items: const[
-                  DropdownMenuItem(value: MangaSource.en, child: Text("EN Manga (MangaDex + WeebCentral)")),
-                  DropdownMenuItem(value: MangaSource.vi, child: Text("VN Manga (ZetTruyen + TruyenQQ)")),
-                  DropdownMenuItem(value: MangaSource.mangadex, child: Text("MangaDex (Multi-lang · R18)")),
-                  DropdownMenuItem(value: MangaSource.zettruyen, child: Text("ZetTruyen (Tiếng Việt)")),
-                  DropdownMenuItem(value: MangaSource.weebcentral, child: Text("WeebCentral (English)")),
-                  DropdownMenuItem(value: MangaSource.truyenqq, child: Text("TruyenQQ (Tiếng Việt)")),
+                items: [
+                  DropdownMenuItem(value: MangaSource.en, child: Text(context.tr('manga_source_en'))),
+                  DropdownMenuItem(value: MangaSource.vi, child: Text(context.tr('manga_source_vi'))),
+                  DropdownMenuItem(value: MangaSource.mangadex, child: Text(context.tr('manga_source_mangadex'))),
+                  DropdownMenuItem(value: MangaSource.zettruyen, child: Text(context.tr('manga_source_zettruyen'))),
+                  DropdownMenuItem(value: MangaSource.weebcentral, child: Text(context.tr('manga_source_weebcentral'))),
+                  DropdownMenuItem(value: MangaSource.truyenqq, child: Text(context.tr('manga_source_truyenqq'))),
                 ],
                 onChanged: (v) { if (v != null) mp.setSource(v); }
               )
@@ -1612,42 +1693,45 @@ class _SettingsViewState extends State<SettingsView> {
       const SizedBox(height: 15),
       _sec(context.tr('settings_general')),
       LiquidGlassContainer(opacity: 0.6, child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children:[
-        Row(children: const[Icon(LucideIcons.globe, color: kColorCoral), SizedBox(width: 10), Text("Language / Ngôn ngữ", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16))]),
+        Row(children: [Icon(LucideIcons.globe, color: kColorCoral), const SizedBox(width: 10), Text(context.tr('setting_language'), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16))]),
         const SizedBox(height: 10),
         DropdownButton<AppLocale>(
           value: sp.locale,
           isExpanded: true, dropdownColor: kColorCream, underline: Container(height: 1, color: kColorCoral),
-          items: const[
-            DropdownMenuItem(value: AppLocale.en, child: Text("English")),
-            DropdownMenuItem(value: AppLocale.vi, child: Text("Tiếng Việt")),
+          items: [
+            DropdownMenuItem(value: AppLocale.en, child: Text(context.tr('en_source'))),
+            DropdownMenuItem(value: AppLocale.vi, child: Text(context.tr('vi_source'))),
           ],
           onChanged: (v) { if (v != null) sp.setLocale(v); }
         )
       ]))),
       const SizedBox(height: 10),
-      _cd(LucideIcons.downloadCloud, context.tr('check_updates'), "Version Check via GitHub Releases", onTap: () => UpdaterService.checkAndUpdate(context)),
+      _cd(LucideIcons.downloadCloud, context.tr('check_updates'), context.tr('setting_check_updates_sub'), onTap: () => UpdaterService.checkAndUpdate(context)),
       const SizedBox(height: 10),
-      _cd(LucideIcons.trash2, context.tr('clear_cache'), "Fixes broken covers by removing old cached 404s", onTap: () async {
+      _cd(LucideIcons.trash2, context.tr('clear_cache'), context.tr('setting_clear_cache_sub'), onTap: () async {
         PaintingBinding.instance.imageCache.clear();
         PaintingBinding.instance.imageCache.clearLiveImages();
         try { await DefaultCacheManager().emptyCache(); } catch (_) {}
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Image cache cleared!"), backgroundColor: Colors.green));
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(context.tr('cache_cleared')), backgroundColor: Colors.green));
       }),
       const SizedBox(height: 10),
-      _cd(LucideIcons.archive, context.tr('backup_data'), "Export all data to a file", onTap: () async {
+      _cd(LucideIcons.archive, context.tr('backup_data'), context.tr('setting_backup_sub'), onTap: () async {
         try {
           final json = await BackupService.exportData();
-          final path = await FilePicker.saveFile(dialogTitle: context.tr('save_backup'), fileName: "anicli_backup.json", type: FileType.custom, allowedExtensions: ['json']);
+          final bytes = Uint8List.fromList(utf8.encode(json));
+          final path = await FilePicker.saveFile(dialogTitle: context.tr('save_backup'), fileName: "anicli_backup.json", type: FileType.custom, allowedExtensions: ['json'], bytes: bytes);
           if (path != null) {
-            await File(path).writeAsString(json);
+            if (!Platform.isAndroid && !Platform.isIOS) {
+              await File(path).writeAsString(json);
+            }
             if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(context.tr('backup_saved')), backgroundColor: Colors.green));
           }
         } catch (e) {
-          if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Backup failed: $e"), backgroundColor: Colors.red));
+          if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(context.tr('backup_failed', [e.toString()])), backgroundColor: Colors.red));
         }
       }),
       const SizedBox(height: 10),
-      _cd(LucideIcons.upload, context.tr('restore_data'), "Import data from a backup file", onTap: () async {
+      _cd(LucideIcons.upload, context.tr('restore_data'), context.tr('setting_restore_sub'), onTap: () async {
         try {
           final result = await FilePicker.pickFiles(type: FileType.custom, allowedExtensions: ['json']);
           if (result == null || result.files.isEmpty) return;
@@ -1666,11 +1750,11 @@ class _SettingsViewState extends State<SettingsView> {
             }
           }
         } catch (e) {
-          if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Restore failed: $e"), backgroundColor: Colors.red));
+          if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(context.tr('restore_failed', [e.toString()])), backgroundColor: Colors.red));
         }
       }),
       const SizedBox(height: 10),
-      _sec("Performance"),
+      _sec(context.tr('section_performance')),
       LiquidGlassContainer(
         opacity: 0.6,
         child: Padding(
@@ -1678,30 +1762,30 @@ class _SettingsViewState extends State<SettingsView> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children:[
-              Row(children: const[Icon(LucideIcons.zap, color: kColorCoral), SizedBox(width: 10), Text("Visual Mode", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16))]),
+              Row(children: [Icon(LucideIcons.zap, color: kColorCoral), const SizedBox(width: 10), Text(context.tr('setting_visual_mode'), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16))]),
               const SizedBox(height: 10),
               DropdownButton<PerformanceMode>(
                 value: sp.perfMode,
                 isExpanded: true,
                 dropdownColor: kColorCream,
                 underline: Container(height: 1, color: kColorCoral),
-                items: const[
-                  DropdownMenuItem(value: PerformanceMode.auto, child: Text("Auto (Detect RAM)")),
-                  DropdownMenuItem(value: PerformanceMode.bestLooking, child: Text("Best Looking (High)")),
-                  DropdownMenuItem(value: PerformanceMode.balanced, child: Text("Balanced (Mid)")),
-                  DropdownMenuItem(value: PerformanceMode.bestPerformance, child: Text("Best Performance (Low)"))
+                items: [
+                  DropdownMenuItem(value: PerformanceMode.auto, child: Text(context.tr('perf_auto_sub'))),
+                  DropdownMenuItem(value: PerformanceMode.bestLooking, child: Text(context.tr('perf_best_looking_sub'))),
+                  DropdownMenuItem(value: PerformanceMode.balanced, child: Text(context.tr('perf_balanced_sub'))),
+                  DropdownMenuItem(value: PerformanceMode.bestPerformance, child: Text(context.tr('perf_best_performance_sub'))),
                 ],
                 onChanged: (v) { if (v != null) sp.setPerformanceMode(v); }
               ),
               const SizedBox(height: 5),
-              Text("Current Tier: ${sp.tier.name.toUpperCase()}  •  Detected RAM: ${sp.ramDebugInfo}", style: const TextStyle(fontSize: 12, color: Colors.black54))
+              Text(context.tr('current_tier', [sp.tier.name.toUpperCase(), sp.ramDebugInfo]), style: const TextStyle(fontSize: 12, color: Colors.black54))
             ]
           )
         )
       ),
       const SizedBox(height: 10),
       if (Platform.isLinux || Platform.isWindows || Platform.isMacOS) ...[
-        _sw(LucideIcons.playCircle, "Use Internal Player", "Use built-in player instead of System MPV", sp.useInternalPlayer, (v) => sp.toggleInternalPlayer(v)),
+        _sw(LucideIcons.playCircle, context.tr('use_internal_player'), context.tr('setting_internal_player_sub'), sp.useInternalPlayer, (v) => sp.toggleInternalPlayer(v)),
         const SizedBox(height: 15),
         LiquidGlassContainer(
           opacity: 0.6,
@@ -1710,13 +1794,13 @@ class _SettingsViewState extends State<SettingsView> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children:[
-                Row(children: const[Icon(LucideIcons.hardDrive, color: kColorCoral), SizedBox(width: 10), Text("Video Cache", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16))]),
+                Row(children: [Icon(LucideIcons.hardDrive, color: kColorCoral), const SizedBox(width: 10), Text(context.tr('setting_video_cache'), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16))]),
                 const SizedBox(height: 5),
-                Text("Buffer Duration: ${sp.cacheSecs > 300 ? 'Unlimited' : sp.cacheSecs.toInt().toString() + ' seconds'}", style: const TextStyle(color: Colors.black54, fontSize: 13)),
+                Text(context.tr('buffer_duration', [sp.cacheSecs > 300 ? context.tr('unlimited') : '${sp.cacheSecs.toInt()} ${context.tr('seconds')}']), style: const TextStyle(color: Colors.black54, fontSize: 13)),
                 Slider(
                   value: sp.cacheSecs, min: 10, max: 310, divisions: 30,
                   activeColor: kColorCoral, inactiveColor: kColorPeach,
-                  label: sp.cacheSecs > 300 ? "Unlimited" : "${sp.cacheSecs.toInt()}s",
+                  label: sp.cacheSecs > 300 ? context.tr('unlimited') : "${sp.cacheSecs.toInt()}s",
                   onChanged: (v) => sp.setCacheSecs(v),
                 ),
               ]
@@ -1725,15 +1809,15 @@ class _SettingsViewState extends State<SettingsView> {
         ),
         const SizedBox(height: 15)
       ],
-      _sec("Development"),
-      _cd(LucideIcons.code2, "GitHub Repository", "minhmc2007/AniCli-Flutter", tr: const Icon(LucideIcons.externalLink, size: 16, color: kColorCoral), onTap: () => _url("https://github.com/minhmc2007/AniCli-Flutter")),
+      _sec(context.tr('section_development')),
+      _cd(LucideIcons.code2, context.tr('setting_github_repo'), context.tr('setting_github_repo_sub'), tr: const Icon(LucideIcons.externalLink, size: 16, color: kColorCoral), onTap: () => _url("https://github.com/minhmc2007/AniCli-Flutter")),
       const SizedBox(height: 10),
-      _cd(LucideIcons.rotateCcw, "Reset Welcome Screen", "Reset OOBE flag for testing", onTap: () async {
+      _cd(LucideIcons.rotateCcw, context.tr('setting_reset_welcome'), context.tr('setting_reset_welcome_sub'), onTap: () async {
         await (await SharedPreferences.getInstance()).remove('is_first_launch');
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Reset! Restart app to see the Welcome Screen."), backgroundColor: kColorCoral));
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(context.tr('reset_done')), backgroundColor: kColorCoral));
       }),
       const SizedBox(height: 30),
-      _sec("About"),
+      _sec(context.tr('section_about')),
       LiquidGlassContainer(
         opacity: 0.6,
         child: Column(
@@ -1745,7 +1829,7 @@ class _SettingsViewState extends State<SettingsView> {
                   children:[
                     Icon(LucideIcons.info, color: kColorDarkText.withOpacity(0.7), size: 20),
                     const SizedBox(width: 16),
-                    Expanded(child: Text("Version", style: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 15))),
+                    Expanded(child: Text(context.tr('version'), style: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 15))),
                     Text("v$kAppVersion", style: GoogleFonts.inter(color: kColorCoral, fontWeight: FontWeight.bold, fontSize: 14))
                   ]
                 )
@@ -1759,7 +1843,7 @@ class _SettingsViewState extends State<SettingsView> {
                   children:[
                     Icon(LucideIcons.hash, color: kColorDarkText.withOpacity(0.7), size: 20),
                     const SizedBox(width: 16),
-                    Expanded(child: Text("Build Number", style: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 15))),
+                    Expanded(child: Text(context.tr('build_number'), style: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 15))),
                     Text(kBuildNumber, style: GoogleFonts.inter(color: kColorCoral, fontWeight: FontWeight.bold, fontSize: 14))
                   ]
                 )
@@ -1771,15 +1855,15 @@ class _SettingsViewState extends State<SettingsView> {
     ];
 
     return SingleChildScrollView(
-      physics: const BouncingScrollPhysics(),
+      physics: t == PerformanceTier.high ? const BouncingScrollPhysics() : const ClampingScrollPhysics(),
       child: Padding(
-        padding: EdgeInsets.symmetric(horizontal: isMobile ? 20 : 40, vertical: 10),
+        padding: EdgeInsets.only(left: isMobile ? 20 : 40, right: isMobile ? 20 : 40, top: 10, bottom: 120),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children:[
             const SizedBox(height: 60),
             Center(
-              child: Text("Settings", style: GoogleFonts.inter(fontSize: 32, fontWeight: FontWeight.bold, color: kColorCoral))
+              child:               Text(context.tr('settings_title'), style: GoogleFonts.inter(fontSize: 32, fontWeight: FontWeight.bold, color: kColorCoral))
               .adapt(t, slideY: true, slideBegin: -0.5)
             ),
             const SizedBox(height: 20),
@@ -1814,7 +1898,7 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
       try {
         items = await ProviderCoordinator.episodesList(src, 'sub');
       } catch (e) {
-        debugPrint('Provider episodes error: $e');
+        debugPrint('[$src] episodes error: $e');
       }
     } else {
       items = useVi ? await ViAnimeCore.getEpisodes(widget.anime.id) : (isNSFW ? await HentaiVietsubCore.getEpisodes(widget.anime.id) : await AniCore.getEpisodes(widget.anime.id));
@@ -1841,8 +1925,8 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
     String displayEpNum = idNum;
 
     if (_isDownloadMode) {
-      if (Platform.isAndroid || Platform.isIOS) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Download unavailable on mobile yet."))); return; }
-      setState(() => _loadingStatus = "Preparing Download...");
+      if (Platform.isAndroid || Platform.isIOS) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(context.tr('detail_download_unavailable')))); return; }
+      setState(() => _loadingStatus = context.tr('detail_preparing_download'));
 
       final url = isProvider
         ? await ProviderCoordinator.getStreamUrl(widget.anime.sourceId, idNum, 'sub')
@@ -1850,33 +1934,41 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
 
       setState(() => _loadingStatus = null);
       if (url != null) {
-        if (mounted) await showDialog(context: context, barrierDismissible: false, builder: (ctx) => GenericDownloadDialog(url: url, fileName: "${widget.anime.name}-EP$displayEpNum.mp4".replaceAll(RegExp(r'[<>:"/\\|?*]'), ''), referer: referer, title: "Downloading", icon: LucideIcons.video));
-      } else { if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Download link not found"))); }
+        if (mounted) await showDialog(context: context, barrierDismissible: false, builder: (ctx) => GenericDownloadDialog(url: url, fileName: "${widget.anime.name}-EP$displayEpNum.mp4".replaceAll(RegExp(r'[<>:"/\\|?*]'), ''), referer: referer, title: context.tr('download'), icon: LucideIcons.video));
+      } else { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(context.tr('detail_download_not_found')))); }
     } else {
-      setState(() => _loadingStatus = "Fetching Stream..."); context.read<UserProvider>().addToHistory(widget.anime, displayEpNum);
+      setState(() => _loadingStatus = context.tr('detail_fetching_stream')); context.read<UserProvider>().addToHistory(widget.anime, displayEpNum);
 
       String? url;
       String resolvedReferer = referer;
       Map<String, String>? streamExtraHeaders;
+      List<StreamEntry> streamEntries = [];
       if (isProvider) {
         try {
           debugPrint('[DEBUG] Fetching streams for sourceId=${widget.anime.sourceId}, ep=$idNum');
           final hints = await ProviderCoordinator.getStreamsWithHints(widget.anime.sourceId, int.tryParse(idNum) ?? 1, 'sub');
           debugPrint('[DEBUG] hints count=${hints.length}');
-          url = hints.keys.isNotEmpty ? hints.keys.first : null;
+          final hintKeys = hints.keys.toList();
+          url = hintKeys.isNotEmpty ? hintKeys.first : null;
           debugPrint('[DEBUG] streamUrl=$url');
           final firstHint = hints.values.isNotEmpty ? hints.values.first : null;
           if (firstHint?.referrer != null) resolvedReferer = firstHint!.referrer!;
           if (firstHint?.extraHeaders != null) streamExtraHeaders = firstHint!.extraHeaders!;
+          for (final k in hintKeys) {
+            final h = hints[k]!;
+            final ref = h.referrer ?? '';
+            final headers = (h.extraHeaders != null && h.extraHeaders!.isNotEmpty) ? Map<String, String>.from(h.extraHeaders!) : const <String, String>{};
+            streamEntries.add(StreamEntry(k, referer: ref, extraHeaders: headers));
+          }
           debugPrint('[DEBUG] resolvedReferer=$resolvedReferer');
           debugPrint('[DEBUG] streamExtraHeaders=$streamExtraHeaders');
-          if (url != null && streamExtraHeaders != null) {
-            if (resolvedReferer.isNotEmpty && !streamExtraHeaders!.containsKey('Referer')) {
-              streamExtraHeaders!['Referer'] = resolvedReferer;
+          if (url != null && streamExtraHeaders != null && url.contains('.m3u8')) {
+            if (resolvedReferer.isNotEmpty && !streamExtraHeaders.containsKey('Referer')) {
+              streamExtraHeaders['Referer'] = resolvedReferer;
             }
             debugPrint('[DEBUG] proxyHeaders=$streamExtraHeaders');
-            await HlsProxy.setHeaders(streamExtraHeaders!);
-            final proxied = HlsProxy.proxyUrl(url!);
+            await HlsProxy.setHeaders(streamExtraHeaders);
+            final proxied = HlsProxy.proxyUrl(url);
             debugPrint('[DEBUG] proxiedUrl=$proxied');
             url = proxied;
             streamExtraHeaders = null;
@@ -1887,7 +1979,7 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
         }
       } else {
         url = useVi ? await ViAnimeCore.getStreamUrl(widget.anime.id, idNum) : (isNSFW ? await HentaiVietsubCore.getStreamUrl(widget.anime.id, idNum) : await AniCore.getStreamUrl(widget.anime.id, idNum));
-        if (url != null && useVi) {
+        if (url != null && useVi && url.contains('.m3u8')) {
           final viaHeaders = <String, String>{
             'Referer': resolvedReferer,
             'User-Agent': _kPlayerUA,
@@ -1895,7 +1987,7 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
           };
           debugPrint('[DEBUG] proxyHeaders=$viaHeaders');
           await HlsProxy.setHeaders(viaHeaders);
-          final proxied = HlsProxy.proxyUrl(url!);
+          final proxied = HlsProxy.proxyUrl(url);
           debugPrint('[DEBUG] proxiedUrl=$proxied');
           url = proxied;
           streamExtraHeaders = null;
@@ -1907,10 +1999,11 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
       if (url is String) {
         final streamUrl = url;
         final streamReferer = resolvedReferer;
-        void openInternal() => Navigator.of(context).push(PageRouteBuilder(pageBuilder: (_, a, __) => InternalPlayerScreen(streamUrl: streamUrl, title: "${widget.anime.name} - Ep $displayEpNum", animeId: widget.anime.id, epNum: displayEpNum, referer: streamReferer, extraHeaders: streamExtraHeaders), transitionsBuilder: (_, a, __, c) => FadeTransition(opacity: a, child: c)));
+        final entries = streamEntries.isNotEmpty ? streamEntries : [StreamEntry(streamUrl, referer: streamReferer, extraHeaders: streamExtraHeaders)];
+        void openInternal() => Navigator.of(context).push(PageRouteBuilder(pageBuilder: (_, a, __) => InternalPlayerScreen(urls: entries, title: context.tr('detail_play_title', [widget.anime.name, displayEpNum.toString()]), animeId: widget.anime.id, epNum: displayEpNum), transitionsBuilder: (_, a, __, c) => FadeTransition(opacity: a, child: c)));
         if ((Platform.isLinux || Platform.isWindows || Platform.isMacOS) && !context.read<SettingsProvider>().useInternalPlayer) {
           final saved = context.read<ProgressProvider>().getProgress(widget.anime.id, displayEpNum); bool resume = false;
-          if (saved > 10) resume = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(backgroundColor: kColorCream, title: const Text("Resume?", style: TextStyle(color: kColorCoral, fontWeight: FontWeight.bold)), content: Text("Continue from ${Duration(seconds: saved).toString().split('.').first}?"), actions:[TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Start Over", style: TextStyle(color: Colors.black54))), ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: kColorCoral, foregroundColor: Colors.white), onPressed: () => Navigator.pop(ctx, true), child: const Text("Resume"))])) ?? false;
+          if (saved > 10) resume = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(backgroundColor: kColorCream, title: Text(context.tr('resume_title'), style: const TextStyle(color: kColorCoral, fontWeight: FontWeight.bold)), content: Text(context.tr('resume_content', [Duration(seconds: saved).toString().split('.').first])), actions:[TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(context.tr('resume_start_over'), style: const TextStyle(color: Colors.black54))), ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: kColorCoral, foregroundColor: Colors.white), onPressed: () => Navigator.pop(ctx, true), child: Text(context.tr('resume_resume')))])) ?? false;
 
           final cacheSecs = context.read<SettingsProvider>().cacheSecs;
           final headerFields = StringBuffer('Referer: $streamReferer');
@@ -1919,7 +2012,7 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
               headerFields.write(', ${e.key}: ${e.value}');
             }
           }
-          final List<String> args =[streamUrl, '--http-header-fields=$headerFields', '--user-agent=$_kPlayerUA', '--force-media-title=${widget.anime.name} - Ep $displayEpNum', '--save-position-on-quit'];
+          final List<String> args =[streamUrl, '--http-header-fields=$headerFields', '--user-agent=$_kPlayerUA', '--ytdl=yes', '--force-media-title=${widget.anime.name} - Ep $displayEpNum', '--save-position-on-quit'];
           if (resume) args.add('--start=$saved');
           if (cacheSecs > 300) {
             args.addAll(['--cache=yes', '--demuxer-max-bytes=2000M', '--demuxer-readahead-secs=99999']);
@@ -1939,13 +2032,13 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
             }
           }
         } else openInternal();
-      } else { if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Stream not found"))); }
+      } else { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(context.tr('detail_stream_not_found')))); }
     }
   }
 
   Widget _buildCircleBtn(IconData icon, VoidCallback onTap, {Color color = kColorCoral, bool fill = false}) => GestureDetector(onTap: onTap, child: LiquidGlassContainer(borderRadius: BorderRadius.circular(50), child: Container(padding: const EdgeInsets.all(12), child: Icon(icon, color: color, fill: fill ? 1.0 : 0.0))));
   @override Widget build(BuildContext context) {
-    final isMobile = MediaQuery.of(context).size.width < 900; final isFav = context.watch<UserProvider>().isFavorite(widget.anime.id); final t = context.watch<SettingsProvider>().tier;
+    final isMobile = MediaQuery.of(context).size.width < 900; final isFav = context.watch<UserProvider>().isFavorite(widget.anime.id); final t = context.select<SettingsProvider, PerformanceTier>((p) => p.tier);
     return Scaffold(body: LiveGradientBackground(child: Stack(fit: StackFit.expand, children:[
       isMobile ? CustomScrollView(physics: const BouncingScrollPhysics(), slivers:[
         SliverToBoxAdapter(child: SizedBox(height: MediaQuery.of(context).size.height * 0.55, child: Stack(fit: StackFit.expand, children:[
@@ -1954,7 +2047,7 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
           Positioned(top: 50, left: 20, right: 20, child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children:[_buildCircleBtn(LucideIcons.arrowLeft, () => Navigator.pop(context)), _buildCircleBtn(LucideIcons.heart, () => context.read<UserProvider>().toggleFavorite(widget.anime), color: isFav ? kColorCoral : Colors.black26, fill: isFav)])),
           Positioned(bottom: 20, left: 20, right: 20, child: Hero(tag: "title_${widget.heroTag}", child: Material(color: Colors.transparent, child: GestureDetector(onTap: () => setState(() => _isTitleExpanded = !_isTitleExpanded), child: Text(widget.anime.name, textAlign: TextAlign.center, maxLines: _isTitleExpanded ? null : 2, overflow: _isTitleExpanded ? null : TextOverflow.ellipsis, style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white, shadows:[Shadow(blurRadius: 10, color: Colors.black.withOpacity(0.5))]))))))
         ]))),
-        SliverToBoxAdapter(child: Padding(padding: const EdgeInsets.all(20), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children:[Text(widget.anime.isManga ? "Chapters" : "Episodes", style: GoogleFonts.inter(fontSize: 28, fontWeight: FontWeight.bold, color: kColorCoral)), if (!widget.anime.isManga) MorphingDownloadButton(isDownloading: _isDownloadMode, onToggle: () => setState(() => _isDownloadMode = !_isDownloadMode))]))),
+        SliverToBoxAdapter(child: Padding(padding: const EdgeInsets.all(20), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children:[Text(widget.anime.isManga ? context.tr('chapters') : context.tr('episodes'), style: GoogleFonts.inter(fontSize: 28, fontWeight: FontWeight.bold, color: kColorCoral)), if (!widget.anime.isManga) MorphingDownloadButton(isDownloading: _isDownloadMode, onToggle: () => setState(() => _isDownloadMode = !_isDownloadMode))]))),
         SliverPadding(padding: const EdgeInsets.only(left: 20, right: 20, bottom: 100), sliver: _isLoading ? const SliverToBoxAdapter(child: Center(child: CircularProgressIndicator(color: kColorCoral))) : SliverList(delegate: SliverChildBuilderDelegate((ctx, i) => EpisodeRowCard(epNum: _episodes[i].contains("|") ? _episodes[i].split("|")[1] : _episodes[i], isDownloadMode: _isDownloadMode, isManga: widget.anime.isManga, onTap: () => _handleItemTap(_episodes[i])).simpleDrop(t, delay: i > 8 ? 0 : i * 50), childCount: _episodes.length)))
       ])
       : Row(crossAxisAlignment: CrossAxisAlignment.start, children:[
@@ -1968,7 +2061,7 @@ class _AnimeDetailViewState extends State<AnimeDetailView> {
         ]))),
         Expanded(child: Padding(padding: const EdgeInsets.only(top: 80, right: 40, bottom: 40), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children:[
           Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children:[
-            Text(widget.anime.isManga ? "Chapters" : "Episodes", style: GoogleFonts.inter(fontSize: 32, fontWeight: FontWeight.bold, color: kColorCoral)).animate().fadeIn().slideY(begin: -0.5, end: 0),
+            Text(widget.anime.isManga ? context.tr('chapters') : context.tr('episodes'), style: GoogleFonts.inter(fontSize: 32, fontWeight: FontWeight.bold, color: kColorCoral)).animate().fadeIn().slideY(begin: -0.5, end: 0),
             if (!widget.anime.isManga) MorphingDownloadButton(isDownloading: _isDownloadMode, onToggle: () => setState(() => _isDownloadMode = !_isDownloadMode))
           ]),
           const SizedBox(height: 20),
@@ -1985,7 +2078,7 @@ class _EpisodeRowCardState extends State<EpisodeRowCard> with AutomaticKeepAlive
   bool isH = false; @override bool get wantKeepAlive => true;
   @override Widget build(BuildContext context) {
     super.build(context); final t = context.read<SettingsProvider>().tier;
-    return MouseRegion(onEnter: (_) => setState(() => isH=true), onExit: (_) => setState(() => isH=false), cursor: SystemMouseCursors.click, child: GestureDetector(onTap: widget.onTap, child: AnimatedContainer(duration: t == PerformanceTier.low ? Duration.zero : const Duration(milliseconds: 200), curve: Curves.easeOut, margin: const EdgeInsets.only(bottom: 12), height: 70, transform: Matrix4.identity()..scale(isH && t != PerformanceTier.low ? 1.01 : 1.0), child: LiquidGlassContainer(opacity: isH ? 0.9 : 0.6, child: Container(decoration: widget.isDownloadMode && isH ? BoxDecoration(border: Border.all(color: kColorCoral, width: 2), borderRadius: BorderRadius.circular(20)) : null, padding: const EdgeInsets.symmetric(horizontal: 20), child: Row(children:[Container(width: 40, height: 40, decoration: BoxDecoration(color: kColorCoral.withOpacity(0.2), shape: BoxShape.circle), child: Center(child: Text("#", style: GoogleFonts.jetBrainsMono(color: kColorCoral, fontWeight: FontWeight.bold)))), const SizedBox(width: 20), Expanded(child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children:[Text(widget.isManga ? "Chapter ${widget.epNum}" : "Episode ${widget.epNum}", style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 16, color: kColorDarkText)), Text(widget.isDownloadMode ? "Tap to download" : "Tap to play", style: GoogleFonts.inter(fontSize: 12, color: Colors.black45))])), Icon(widget.isDownloadMode ? LucideIcons.download : (widget.isManga ? LucideIcons.bookOpen : LucideIcons.playCircle), color: kColorCoral, size: 28)]))))));
+    return MouseRegion(onEnter: (_) => setState(() => isH=true), onExit: (_) => setState(() => isH=false), cursor: SystemMouseCursors.click, child: GestureDetector(onTap: widget.onTap, child: AnimatedContainer(duration: t == PerformanceTier.low ? Duration.zero : const Duration(milliseconds: 200), curve: Curves.easeOut, margin: const EdgeInsets.only(bottom: 12), height: 70, transform: Matrix4.identity()..scale(isH && t != PerformanceTier.low ? 1.01 : 1.0), child: LiquidGlassContainer(opacity: isH ? 0.9 : 0.6, child: Container(decoration: widget.isDownloadMode && isH ? BoxDecoration(border: Border.all(color: kColorCoral, width: 2), borderRadius: BorderRadius.circular(20)) : null, padding: const EdgeInsets.symmetric(horizontal: 20), child: Row(children:[Container(width: 40, height: 40, decoration: BoxDecoration(color: kColorCoral.withOpacity(0.2), shape: BoxShape.circle), child: Center(child: Text("#", style: GoogleFonts.jetBrainsMono(color: kColorCoral, fontWeight: FontWeight.bold)))), const SizedBox(width: 20), Expanded(child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children:[Text(widget.isManga ? context.tr('chapter_prefix', [widget.epNum]) : context.tr('episode_prefix', [widget.epNum]), style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 16, color: kColorDarkText)), Text(widget.isDownloadMode ? context.tr('tap_to_download') : context.tr('tap_to_play'), style: GoogleFonts.inter(fontSize: 12, color: Colors.black45))])), Icon(widget.isDownloadMode ? LucideIcons.download : (widget.isManga ? LucideIcons.bookOpen : LucideIcons.playCircle), color: kColorCoral, size: 28)]))))));
   }
 }
 
@@ -1993,7 +2086,7 @@ class MorphingDownloadButton extends StatelessWidget {
   final bool isDownloading; final VoidCallback onToggle; const MorphingDownloadButton({super.key, required this.isDownloading, required this.onToggle});
   @override Widget build(BuildContext context) {
     if (context.read<SettingsProvider>().tier == PerformanceTier.low) return IconButton(onPressed: onToggle, icon: Icon(isDownloading ? LucideIcons.check : LucideIcons.download, color: kColorCoral), style: IconButton.styleFrom(backgroundColor: Colors.white));
-    return TweenAnimationBuilder<double>(duration: const Duration(milliseconds: 600), curve: Curves.easeOutBack, tween: Tween(begin: 0.0, end: isDownloading ? 1.0 : 0.0), builder: (c, t, child) => GestureDetector(onTap: onToggle, child: Container(width: lerpDouble(50, 240, t)!, height: 50, decoration: BoxDecoration(color: Color.lerp(Colors.white, kColorCoral, t)!, borderRadius: BorderRadius.circular(lerpDouble(25, 15, t)!), boxShadow:[BoxShadow(color: kColorCoral.withOpacity(0.2 + (t * 0.2)), blurRadius: 15, offset: const Offset(0, 5))]), child: ClipRect(child: Stack(alignment: Alignment.center, children:[Opacity(opacity: (1.0 - t).clamp(0.0, 1.0), child: Transform.translate(offset: Offset(-20 * t, 0), child: Icon(LucideIcons.download, color: Color.lerp(kColorCoral, Colors.white, t)!))), Opacity(opacity: t.clamp(0.0, 1.0), child: Transform.translate(offset: Offset(20 * (1.0 - t), 0), child: SingleChildScrollView(scrollDirection: Axis.horizontal, physics: const NeverScrollableScrollPhysics(), child: Container(width: 240, padding: const EdgeInsets.symmetric(horizontal: 16), child: Row(mainAxisAlignment: MainAxisAlignment.center, children: const[Icon(LucideIcons.downloadCloud, color: Colors.white, size: 18), SizedBox(width: 8), Text("Select Ep to Download", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)), SizedBox(width: 5), Icon(LucideIcons.x, color: Colors.white70, size: 16)])))))])))));
+    return TweenAnimationBuilder<double>(duration: const Duration(milliseconds: 600), curve: Curves.easeOutBack, tween: Tween(begin: 0.0, end: isDownloading ? 1.0 : 0.0), builder: (c, t, child) => GestureDetector(onTap: onToggle, child: Container(width: lerpDouble(50, 240, t)!, height: 50, decoration: BoxDecoration(color: Color.lerp(Colors.white, kColorCoral, t)!, borderRadius: BorderRadius.circular(lerpDouble(25, 15, t)!), boxShadow:[BoxShadow(color: kColorCoral.withOpacity(0.2 + (t * 0.2)), blurRadius: 15, offset: const Offset(0, 5))]), child: ClipRect(child: Stack(alignment: Alignment.center, children:[Opacity(opacity: (1.0 - t).clamp(0.0, 1.0), child: Transform.translate(offset: Offset(-20 * t, 0), child: Icon(LucideIcons.download, color: Color.lerp(kColorCoral, Colors.white, t)!))), Opacity(opacity: t.clamp(0.0, 1.0), child: Transform.translate(offset: Offset(20 * (1.0 - t), 0), child: SingleChildScrollView(scrollDirection: Axis.horizontal, physics: const NeverScrollableScrollPhysics(), child: Container(width: 240, padding: const EdgeInsets.symmetric(horizontal: 16), child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(LucideIcons.downloadCloud, color: Colors.white, size: 18), const SizedBox(width: 8), Text(context.tr('detail_select_ep_download'), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)), const SizedBox(width: 5), Icon(LucideIcons.x, color: Colors.white70, size: 16)])))))])))));
   }
 }
 
@@ -2002,8 +2095,8 @@ class AnimeGrid extends StatelessWidget {
   final Map<String, VoidCallback>? continueCallbacks;
   const AnimeGrid({super.key, required this.animes, required this.onTap, this.physics = const NeverScrollableScrollPhysics(), this.shrinkWrap = true, required this.tagPrefix, this.continueCallbacks});
   @override Widget build(BuildContext context) {
-    final isMobile = MediaQuery.of(context).size.width < 900; final t = context.watch<SettingsProvider>().tier;
-    return Padding(padding: EdgeInsets.symmetric(horizontal: isMobile ? 20 : 40), child: GridView.builder(physics: physics, shrinkWrap: shrinkWrap, gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent: isMobile ? 150 : 180, childAspectRatio: 0.7, crossAxisSpacing: isMobile ? 15 : 20, mainAxisSpacing: isMobile ? 15 : 20), itemCount: animes.length, itemBuilder: (ctx, i) => AnimeCard(anime: animes[i], heroTag: "${tagPrefix}_${animes[i].id}", onTap: () => onTap(animes[i], "${tagPrefix}_${animes[i].id}"), showPlayBadge: continueCallbacks?.containsKey(animes[i].id) ?? false, onPlay: continueCallbacks?[animes[i].id]).adapt(t, delay: i * 50, isScale: true)));
+    final isMobile = MediaQuery.of(context).size.width < 900; final t = context.select<SettingsProvider, PerformanceTier>((p) => p.tier);
+    return Padding(padding: EdgeInsets.symmetric(horizontal: isMobile ? 20 : 40), child: GridView.builder(physics: physics, shrinkWrap: shrinkWrap, gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent: isMobile ? 150 : 180, childAspectRatio: 0.7, crossAxisSpacing: isMobile ? 15 : 20, mainAxisSpacing: isMobile ? 15 : 20), itemCount: animes.length, itemBuilder: (ctx, i) => AnimeCard(anime: animes[i], heroTag: "${tagPrefix}_${animes[i].id}", onTap: () => onTap(animes[i], "${tagPrefix}_${animes[i].id}"), showPlayBadge: continueCallbacks?.containsKey(animes[i].id) ?? false, onPlay: continueCallbacks?[animes[i].id]).adapt(t, delay: i < 10 ? i * 50 : 0, isScale: true)));
   }
 }
 
@@ -2012,7 +2105,7 @@ class _AnimeCardState extends State<AnimeCard> with AutomaticKeepAliveClientMixi
   bool isH = false; @override bool get wantKeepAlive => true;
   @override Widget build(BuildContext context) {
     super.build(context);
-    return MouseRegion(onEnter: (_) => setState(() => isH=true), onExit: (_) => setState(() => isH=false), cursor: SystemMouseCursors.click, child: GestureDetector(onTap: widget.onTap, child: AnimatedContainer(duration: 200.ms, transform: Matrix4.identity()..scale(isH && context.watch<SettingsProvider>().tier != PerformanceTier.low ? 1.05 : 1.0), child: Stack(fit: StackFit.expand, children:[CozyHeroImage(heroTag: widget.heroTag, imageUrl: widget.anime.fullImageUrl, radius: 20, withShadow: isH, fallbackTitle: widget.anime.name), Container(decoration: BoxDecoration(borderRadius: BorderRadius.circular(20), gradient: LinearGradient(colors:[Colors.transparent, kColorDarkText.withOpacity(0.8)], begin: Alignment.center, end: Alignment.bottomCenter))), Positioned(bottom: 12, left: 12, right: 12, child: Hero(tag: "title_${widget.heroTag}", child: Material(color: Colors.transparent, child: Text(widget.anime.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white))))), if (widget.anime.isManga) Positioned(top: 10, right: 10, child: Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2), decoration: BoxDecoration(color: kColorCoral, borderRadius: BorderRadius.circular(4)), child: const Text("MANGA", style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)))), if (widget.showPlayBadge && widget.onPlay != null) Positioned(top: 10, left: 10, child: GestureDetector(onTap: widget.onPlay, child: Container(padding: const EdgeInsets.all(6), decoration: BoxDecoration(color: kColorCoral.withOpacity(0.9), borderRadius: BorderRadius.circular(50)), child: const Icon(LucideIcons.play, color: Colors.white, size: 18))))]))));
+    return MouseRegion(onEnter: (_) => setState(() => isH=true), onExit: (_) => setState(() => isH=false), cursor: SystemMouseCursors.click, child: GestureDetector(onTap: widget.onTap, child: AnimatedContainer(duration: 200.ms, transform: Matrix4.identity()..scale(isH && context.select<SettingsProvider, PerformanceTier>((p) => p.tier) != PerformanceTier.low ? 1.05 : 1.0), child: Stack(fit: StackFit.expand, children:[CozyHeroImage(heroTag: widget.heroTag, imageUrl: widget.anime.fullImageUrl, radius: 20, withShadow: isH, fallbackTitle: widget.anime.name), Container(decoration: BoxDecoration(borderRadius: BorderRadius.circular(20), gradient: LinearGradient(colors:[Colors.transparent, kColorDarkText.withOpacity(0.8)], begin: Alignment.center, end: Alignment.bottomCenter))), Positioned(bottom: 12, left: 12, right: 12, child: Hero(tag: "title_${widget.heroTag}", child: Material(color: Colors.transparent, child: Text(widget.anime.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white))))), if (widget.anime.isManga) Positioned(top: 10, right: 10, child: Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2), decoration: BoxDecoration(color: kColorCoral, borderRadius: BorderRadius.circular(4)), child: Text(context.tr('manga_badge'), style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)))), if (widget.anime.provider != null && !widget.showPlayBadge) Positioned(top: 10, left: 10, child: Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2), decoration: BoxDecoration(color: kColorCoral.withOpacity(0.85), borderRadius: BorderRadius.circular(4)), child: Text(widget.anime.provider!, style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)))), if (widget.showPlayBadge && widget.onPlay != null) Positioned(top: 10, left: 10, child: GestureDetector(onTap: widget.onPlay, child: Container(padding: const EdgeInsets.all(6), decoration: BoxDecoration(color: kColorCoral.withOpacity(0.9), borderRadius: BorderRadius.circular(50)), child: const Icon(LucideIcons.play, color: Colors.white, size: 18))))]))));
   }
 }
 
@@ -2021,16 +2114,16 @@ class _HistoryCardState extends State<HistoryCard> with AutomaticKeepAliveClient
   bool isH = false; @override bool get wantKeepAlive => true;
   @override Widget build(BuildContext context) {
     super.build(context);
-    final t = context.watch<SettingsProvider>().tier;
-    return MouseRegion(onEnter: (_) => setState(() => isH=true), onExit: (_) => setState(() => isH=false), cursor: SystemMouseCursors.click, child: GestureDetector(onTap: widget.onTap, child: AnimatedContainer(duration: const Duration(milliseconds: 200), curve: Curves.easeOut, margin: const EdgeInsets.only(bottom: 15), height: 90, transform: Matrix4.identity()..scale(isH && t != PerformanceTier.low ? 1.02 : 1.0), child: LiquidGlassContainer(opacity: isH ? 0.9 : 0.6, child: Row(children:[SizedBox(width: 90, height: 90, child: CozyHeroImage(heroTag: "history_${widget.item.anime.id}", imageUrl: widget.item.anime.fullImageUrl, radius: 15, fallbackTitle: widget.item.anime.name)), const SizedBox(width: 20), Expanded(child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children:[Text(widget.item.anime.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 16)), Text(widget.item.anime.isManga ? "Chapter ${widget.item.displayEpisode}" : "Episode ${widget.item.displayEpisode}", style: GoogleFonts.inter(color: kColorCoral, fontWeight: FontWeight.w600, fontSize: 14))])), widget.onContinue != null ? IconButton(icon: Icon(widget.item.anime.isManga ? LucideIcons.bookOpen : LucideIcons.playCircle, color: kColorCoral), onPressed: widget.onContinue) : Padding(padding: const EdgeInsets.only(right: 20), child: Icon(widget.item.anime.isManga ? LucideIcons.bookOpen : LucideIcons.playCircle, color: kColorCoral, size: 30))])))));
+    final t = context.select<SettingsProvider, PerformanceTier>((p) => p.tier);
+    return MouseRegion(onEnter: (_) => setState(() => isH=true), onExit: (_) => setState(() => isH=false), cursor: SystemMouseCursors.click, child: GestureDetector(onTap: widget.onTap, child: AnimatedContainer(duration: const Duration(milliseconds: 200), curve: Curves.easeOut, margin: const EdgeInsets.only(bottom: 15), height: 90, transform: Matrix4.identity()..scale(isH && t != PerformanceTier.low ? 1.02 : 1.0), child: LiquidGlassContainer(opacity: isH ? 0.9 : 0.6, child: Row(children:[SizedBox(width: 90, height: 90, child: CozyHeroImage(heroTag: "history_${widget.item.anime.id}", imageUrl: widget.item.anime.fullImageUrl, radius: 15, fallbackTitle: widget.item.anime.name)), const SizedBox(width: 20), Expanded(child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children:[Text(widget.item.anime.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 16)), Text(widget.item.anime.isManga ? context.tr('chapter_prefix', [widget.item.displayEpisode]) : context.tr('episode_prefix', [widget.item.displayEpisode]), style: GoogleFonts.inter(color: kColorCoral, fontWeight: FontWeight.w600, fontSize: 14))])), widget.onContinue != null ? IconButton(icon: Icon(widget.item.anime.isManga ? LucideIcons.bookOpen : LucideIcons.playCircle, color: kColorCoral), onPressed: widget.onContinue) : Padding(padding: const EdgeInsets.only(right: 20), child: Icon(widget.item.anime.isManga ? LucideIcons.bookOpen : LucideIcons.playCircle, color: kColorCoral, size: 30))])))));
   }
 }
 
 class FeaturedCarousel extends StatelessWidget {
   final List<AnimeModel> animes; final Function(AnimeModel, String) onTap; const FeaturedCarousel({super.key, required this.animes, required this.onTap});
   @override Widget build(BuildContext context) {
-    final t = context.watch<SettingsProvider>().tier;
-    return SizedBox(height: 220, child: ListView.builder(padding: const EdgeInsets.symmetric(horizontal: 40), scrollDirection: Axis.horizontal, itemCount: animes.length, itemBuilder: (c, i) => GestureDetector(onTap: () => onTap(animes[i], "carousel_${animes[i].id}"), child: Container(width: 300, margin: const EdgeInsets.only(right: 20), decoration: BoxDecoration(borderRadius: BorderRadius.circular(20), boxShadow: t != PerformanceTier.low ?[BoxShadow(color: kColorCoral.withOpacity(0.2), blurRadius: 15, offset: const Offset(0, 8))] :[]), child: Stack(fit: StackFit.expand, children:[CozyHeroImage(heroTag: "carousel_${animes[i].id}", imageUrl: animes[i].fullImageUrl, radius: 20, fallbackTitle: animes[i].name), Container(decoration: BoxDecoration(borderRadius: BorderRadius.circular(20), gradient: LinearGradient(colors:[Colors.transparent, kColorDarkText.withOpacity(0.9)], begin: Alignment.topCenter, end: Alignment.bottomCenter))), Positioned(bottom: 20, left: 20, child: SizedBox(width: 260, child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children:[Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), decoration: BoxDecoration(color: kColorCoral, borderRadius: BorderRadius.circular(8)), child: const Text("HOT", style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold))), const SizedBox(height: 5), Text(animes[i].name, maxLines: 1, overflow: TextOverflow.ellipsis, style: GoogleFonts.inter(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold))])))]))).adapt(t, delay: i * 100)));
+    final t = context.select<SettingsProvider, PerformanceTier>((p) => p.tier);
+    return SizedBox(height: 220, child: ListView.builder(padding: const EdgeInsets.symmetric(horizontal: 40), scrollDirection: Axis.horizontal, itemCount: animes.length, itemBuilder: (c, i) => GestureDetector(onTap: () => onTap(animes[i], "carousel_${animes[i].id}"), child: Container(width: 300, margin: const EdgeInsets.only(right: 20), decoration: BoxDecoration(borderRadius: BorderRadius.circular(20), boxShadow: t != PerformanceTier.low ?[BoxShadow(color: kColorCoral.withOpacity(0.2), blurRadius: 15, offset: const Offset(0, 8))] :[]), child: Stack(fit: StackFit.expand, children:[CozyHeroImage(heroTag: "carousel_${animes[i].id}", imageUrl: animes[i].fullImageUrl, radius: 20, fallbackTitle: animes[i].name), Container(decoration: BoxDecoration(borderRadius: BorderRadius.circular(20), gradient: LinearGradient(colors:[Colors.transparent, kColorDarkText.withOpacity(0.9)], begin: Alignment.topCenter, end: Alignment.bottomCenter))), Positioned(bottom: 20, left: 20, child: SizedBox(width: 260, child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children:[Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), decoration: BoxDecoration(color: kColorCoral, borderRadius: BorderRadius.circular(8)), child: Text(context.tr('hot'), style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold))), const SizedBox(height: 5), Text(animes[i].name, maxLines: 1, overflow: TextOverflow.ellipsis, style: GoogleFonts.inter(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold))])))]))).adapt(t, delay: i * 100)));
   }
 }
 

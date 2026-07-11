@@ -88,17 +88,12 @@ class HlsProxy {
 
         // Check if this is a master playlist (contains #EXT-X-STREAM-INF)
         if (body.contains('#EXT-X-STREAM-INF:')) {
-          final resolved = await _resolveFirstVariant(body, targetUrl);
-          if (resolved != null) {
-            debugPrint('[HlsProxy] resolved variant=${resolved.substring(0, resolved.length.clamp(0, 500))}');
-            request.response.headers.set('content-type', 'application/vnd.apple.mpegurl');
-            request.response.write(resolved);
-          } else {
-            final rewritten = _rewritePlaylist(body, targetUrl);
-            debugPrint('[HlsProxy] rewritten master=${rewritten.substring(0, rewritten.length.clamp(0, 500))}');
-            request.response.headers.set('content-type', 'application/vnd.apple.mpegurl');
-            request.response.write(rewritten);
-          }
+          // Rewrite variant URLs through the proxy so mpv sees the full
+          // master playlist with all quality levels and can choose dynamically.
+          final rewritten = _rewritePlaylist(body, targetUrl);
+          debugPrint('[HlsProxy] rewritten master=${rewritten.substring(0, rewritten.length.clamp(0, 500))}');
+          request.response.headers.set('content-type', 'application/vnd.apple.mpegurl');
+          request.response.write(rewritten);
         } else {
           final rewritten = _rewritePlaylist(body, targetUrl);
           debugPrint('[HlsProxy] rewritten media=${rewritten.substring(0, rewritten.length.clamp(0, 500))}');
@@ -122,33 +117,6 @@ class HlsProxy {
       try { await request.response.close(); } catch (_) {}
       debugPrint('[HlsProxy] done');
     }
-  }
-
-  static Future<String?> _resolveFirstVariant(String masterBody, String masterUrl) async {
-    final base = masterUrl.substring(0, masterUrl.lastIndexOf('/') + 1);
-    final lines = masterBody.split('\n');
-
-    for (final line in lines) {
-      final trimmed = line.trim();
-      if (trimmed.isEmpty || trimmed.startsWith('#')) continue;
-      final variantUrl = trimmed.startsWith('http') ? trimmed : '$base$trimmed';
-      debugPrint('[HlsProxy] fetching variant: $variantUrl');
-      try {
-        final variantRes = await _fetch(variantUrl);
-        if (variantRes.statusCode != 200) {
-          debugPrint('[HlsProxy] variant fetch failed: ${variantRes.statusCode}');
-          continue;
-        }
-        final variantBody = await variantRes.transform(utf8.decoder).join();
-        debugPrint('[HlsProxy] variant body=${variantBody.substring(0, variantBody.length.clamp(0, 500))}');
-        final rewritten = _rewritePlaylist(variantBody, variantUrl);
-        return rewritten;
-      } catch (e) {
-        debugPrint('[HlsProxy] variant fetch error: $e');
-        continue;
-      }
-    }
-    return null;
   }
 
   static String _rewritePlaylist(String playlist, String baseUrl) {
