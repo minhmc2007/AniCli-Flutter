@@ -215,12 +215,12 @@ class HentaiVietsubCore {
 
 class AniCore {
   static const String baseUrl = 'https://api.allanime.day/api';
-  static const String referer = 'https://allmanga.to';
+  static const String referer = 'https://youtu-chan.com';
   static const String agent =
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
       '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
-  static const String _aesKeySource = 'SimtVuagFbGR2K7P';
+  static const String _aesKeySource = 'Xot36i3lK3:v1';
 
   static const String _showQuery = r'''
 query($search: SearchInput, $limit: Int, $page: Int, $translationType: VaildTranslationTypeEnumType, $countryOrigin: VaildCountryOriginEnumType) {
@@ -232,7 +232,7 @@ query($search: SearchInput, $limit: Int, $page: Int, $translationType: VaildTran
 
   static Future<List<AnimeModel>> getTrending({int page = 1}) async {
     final variables = {
-      'search': {'allowAdult': false, 'allowUnknown': false, 'sortBy': 'Top'},
+      'search': {'allowAdult': true, 'allowUnknown': true, 'sortBy': 'Top'},
       'limit': 40,
       'page': page,
       'translationType': 'sub',
@@ -249,7 +249,7 @@ query($search: SearchInput, $limit: Int, $page: Int, $translationType: VaildTran
 
   static Future<List<AnimeModel>> search(String query, {int page = 1}) async {
     final variables = {
-      'search': {'allowAdult': false, 'allowUnknown': false, 'query': query},
+      'search': {'allowAdult': true, 'allowUnknown': true, 'query': query},
       'limit': 40,
       'page': page,
       'translationType': 'sub',
@@ -342,51 +342,40 @@ query ($showId: String!, $translationType: VaildTranslationTypeEnumType!, $episo
         }
       }
 
+      // First pass: try clock URLs (best quality, multi-resolution HLS)
       for (final source in parsedSources) {
         if (source is! Map) continue;
         String? url = source['sourceUrl'] as String?;
         if (url == null) continue;
+        if (url.startsWith('--')) url = decrypt(url.substring(2));
+        if (!url.contains('/clock')) continue;
 
-        if (url.startsWith('--')) {
-          url = decrypt(url.substring(2));
-        }
-
-        if (!url.startsWith('http')) continue;
-
-        if (url.contains('/clock')) {
-          final clockUrl = url.replaceFirst('/clock', '/clock.json');
-          try {
-            final clockRes = await http.get(Uri.parse(clockUrl), headers: {
-              'User-Agent': agent,
-              'Referer': referer,
-            });
-            if (clockRes.statusCode == 200) {
-              final clockData = jsonDecode(clockRes.body);
-              final links = clockData['links'];
-              if (links is List && links.isNotEmpty) {
-                return links[0]['link'] as String?;
-              }
+        final clockUrl = url.replaceFirst('/clock?', '/clock.json?');
+        try {
+          final clockRes = await http.get(Uri.parse(clockUrl), headers: {
+            'User-Agent': agent,
+            'Referer': 'https://youtu-chan.com',
+          });
+          if (clockRes.statusCode == 200) {
+            final clockData = jsonDecode(clockRes.body);
+            final links = clockData['links'] as List?;
+            if (links != null && links.isNotEmpty) {
+              final link = links[0]['link'] as String?;
+              if (link != null) return link;
             }
-          } catch (e) {
-            debugPrint('AniCore clock.json error: $e');
           }
+        } catch (e) {
+          debugPrint('AniCore clock.json error: $e');
         }
       }
 
+      // Second pass: return first direct HTTP URL
       for (final source in parsedSources) {
         if (source is! Map) continue;
         String? url = source['sourceUrl'] as String?;
         if (url == null) continue;
-
-        if (url.startsWith('--')) {
-          url = decrypt(url.substring(2));
-        }
-
-        if (url.startsWith('http') &&
-            !url.contains('gogohd') &&
-            !url.contains('vidstreaming')) {
-          return url;
-        }
+        if (url.startsWith('--')) url = decrypt(url.substring(2));
+        if (url.startsWith('http')) return url;
       }
     } catch (e) {
       debugPrint('AniCore.getStreamUrl error: $e');
@@ -399,12 +388,15 @@ query ($showId: String!, $translationType: VaildTranslationTypeEnumType!, $episo
       final keyHash = sha256.convert(utf8.encode(_aesKeySource)).bytes;
       final key = encrypt.Key(Uint8List.fromList(keyHash));
 
-      final decodedBytes = base64.decode(blob);
-      if (decodedBytes.length < 28) return '[]';
+      final raw = base64.decode(blob);
+      if (raw.length < 14) return '{}';
 
-      final iv12 = decodedBytes.sublist(0, 12);
-      final ciphertextBytes =
-          decodedBytes.sublist(12, decodedBytes.length - 16);
+      // IV = bytes[1..12] (12 bytes, skip version byte at [0])
+      final iv12 = raw.sublist(1, 13);
+      // ciphertext = bytes[13..(length-16)] (skip 12-byte nonce + 16-byte GCM tag)
+      final ctLen = raw.length - 13 - 16;
+      if (ctLen <= 0) return '{}';
+      final ciphertextBytes = raw.sublist(13, 13 + ctLen);
 
       final ctrIv = Uint8List(16);
       ctrIv.setAll(0, iv12);
@@ -424,7 +416,7 @@ query ($showId: String!, $translationType: VaildTranslationTypeEnumType!, $episo
       );
     } catch (e) {
       debugPrint('_decodeTobeparsed error: $e');
-      return '[]';
+      return '{}';
     }
   }
 
@@ -590,20 +582,28 @@ class ProviderCoordinator {
   static Future<List<SelectionOption>> searchAll(String query, String mode,
       {List<String>? providers}) async {
     final list = providers ?? _registry.defaultStack;
-    final results = <SelectionOption>[];
+    final allResults = <SelectionOption>[];
     for (final id in list) {
       try {
         final p = _registry.provider(id);
         final r = query.isEmpty
             ? await p.getTrending(mode)
             : await p.searchAnime(query, mode);
-        results.addAll(r);
+        for (final opt in r) {
+          allResults.add(SelectionOption(
+            key: makeQualifiedId(opt.extraData, opt.key, id),
+            label: opt.label,
+            title: opt.title,
+            thumbnail: opt.thumbnail,
+            extraData: {...?opt.extraData, 'provider': id},
+          ));
+        }
       } catch (e) {
         debugPrint('$id ${query.isEmpty ? "trending" : "search"} error: $e');
       }
     }
-    if (results.isEmpty) throw Exception('No results from any provider');
-    return results;
+    if (allResults.isEmpty) throw Exception('No results from any provider');
+    return mergeResults(allResults);
   }
 
   static Future<List<AnimeModel>> searchAsAnimeModel(
@@ -614,13 +614,16 @@ class ProviderCoordinator {
     final options = await searchAll(query, mode, providers: providers);
     return options
         .map((opt) {
-          final qid = makeQualifiedId(opt.extraData, opt.key, providers?.first ?? _registry.defaultStack.first);
+          final provider = (opt.extraData?['provider'] as String?) ?? providers?.first ?? _registry.defaultStack.first;
+          final rawKey = opt.key.contains('::') ? opt.key.split('::').last : opt.key;
+          final qid = '$provider::$rawKey';
           return AnimeModel(
             id: qid,
             name: opt.title,
             thumbnail: opt.thumbnail,
             isManga: false,
             sourceId: qid,
+            provider: provider,
           );
         })
         .toList();
@@ -632,7 +635,12 @@ class ProviderCoordinator {
   ) async {
     final (providerId, showId) = parseQualifiedIdUnsafe(qualifiedId);
     final p = _registry.provider(providerId);
-    return p.episodesList(showId, mode);
+    try {
+      return await p.episodesList(showId, mode);
+    } catch (e) {
+      debugPrint('[$providerId] episodesList error: $e');
+      rethrow;
+    }
   }
 
   static Future<Map<String, StreamPlaybackHint>> getStreamsWithHints(

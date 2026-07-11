@@ -9,6 +9,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
   shared_preferences: ^2.2.2
   file_picker: ^11.0.2
   # Networking
@@ -38,6 +40,28 @@ dependencies:
   encrypt: ^5.0.3
   pointycastle: ^3.9.1
   flutter_inappwebview: ^6.1.0
+dependency_overrides:
+  media_kit:
+    git:
+      url: https://github.com/minhmc2007/media-kit.git
+      ref: v1.2.7
+      path: media_kit
+  media_kit_libs_video:
+    git:
+      url: https://github.com/minhmc2007/media-kit.git
+      ref: v1.2.7
+      path: libs/universal/media_kit_libs_video
+  media_kit_libs_windows_video:
+    git:
+      url: https://github.com/minhmc2007/media-kit.git
+      ref: v1.2.7
+      path: libs/windows/media_kit_libs_windows_video
+  media_kit_libs_android_video:
+    git:
+      url: https://github.com/minhmc2007/media-kit.git
+      ref: v1.2.7
+      path: libs/android/media_kit_libs_android_video
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

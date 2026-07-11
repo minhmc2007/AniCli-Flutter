@@ -1,4 +1,5 @@
 # Miscellaneous
+/tmp/
 *.class
 *.lock
 *.log
@@ -6,6 +7,7 @@
 *.swp
 .buildlog/
 .history
+--Frag*.part
 
 /manga-tui
 /curd

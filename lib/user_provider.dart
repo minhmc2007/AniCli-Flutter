@@ -154,4 +154,12 @@ class UserProvider extends ChangeNotifier {
     final list = _isNSFW ? _nsfwHistory : _normalHistory;
     await prefs.setString(key, jsonEncode(list.map((e) => e.toJson()).toList()));
   }
+
+  Future<void> reload() async {
+    _normalFavorites.clear();
+    _normalHistory.clear();
+    _nsfwFavorites.clear();
+    _nsfwHistory.clear();
+    await _loadData();
+  }
 }

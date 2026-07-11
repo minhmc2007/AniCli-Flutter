@@ -14,6 +14,7 @@ class AnimeModel {
   String? thumbnail;
   final bool isManga;
   final String sourceId;
+  final String? provider;
 
   AnimeModel({
     required this.id,
@@ -21,6 +22,7 @@ class AnimeModel {
     this.thumbnail,
     this.isManga = false,
     this.sourceId = 'en',
+    this.provider,
   });
 
   factory AnimeModel.fromJson(Map<String, dynamic> json) => AnimeModel(
@@ -29,6 +31,7 @@ class AnimeModel {
         thumbnail: json['thumbnail'],
         isManga: json['isManga'] ?? false,
         sourceId: json['sourceId'] ?? 'en',
+        provider: json['provider'] as String?,
       );
 
   factory AnimeModel.fromMangaDex(Map<String, dynamic> json) {
@@ -55,7 +58,8 @@ class AnimeModel {
         name: title,
         thumbnail: thumbUrl,
         isManga: true,
-        sourceId: 'mangadex');
+        sourceId: 'mangadex',
+        provider: 'mangadex');
   }
 
   factory AnimeModel.fromZetTruyen(Map<String, dynamic> json) {
@@ -65,6 +69,7 @@ class AnimeModel {
       thumbnail: json['thumbnail'],
       isManga: true,
       sourceId: 'zettruyen',
+            provider: 'zettruyen',
     );
   }
 
@@ -75,6 +80,7 @@ class AnimeModel {
       thumbnail: json['thumbnail'],
       isManga: true,
       sourceId: 'truyenqq',
+            provider: 'truyenqq',
     );
   }
 
@@ -84,6 +90,7 @@ class AnimeModel {
         'thumbnail': thumbnail,
         'isManga': isManga,
         'sourceId': sourceId,
+        if (provider != null) 'provider': provider,
       };
 
   String get fullImageUrl {
@@ -164,6 +171,7 @@ class MangaSourceProvider extends ChangeNotifier {
     await prefs.setString(_key, s.name);
     notifyListeners();
   }
+  Future<void> reload() async { _loaded = false; _load(); }
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -218,6 +226,7 @@ class ZetTruyenCore {
             thumbnail: cover,
             isManga: true,
             sourceId: 'zettruyen',
+            provider: 'zettruyen',
           ));
         }
       }
@@ -254,6 +263,7 @@ class ZetTruyenCore {
         thumbnail: cover,
         isManga: true,
         sourceId: 'zettruyen',
+            provider: 'zettruyen',
       ));
     }
     return results;
@@ -556,6 +566,7 @@ class WeebCentralCore {
         thumbnail: coverMatch?.group(1),
         isManga: true,
         sourceId: 'weebcentral',
+            provider: 'weebcentral',
       ));
     }
     return results;
@@ -582,6 +593,7 @@ class WeebCentralCore {
         thumbnail: coverMatch?.group(1),
         isManga: true,
         sourceId: 'weebcentral',
+            provider: 'weebcentral',
       ));
     }
     return results;
@@ -671,7 +683,7 @@ class EnMangaCore {
       _searchMangaDex(query.trim()),
       WeebCentralCore.search(query.trim()),
     ]);
-    return _merge(results[0], results[1]);
+    return _mergeAll(results);
   }
 
   static Future<List<AnimeModel>> _searchMangaDex(String query) async {
@@ -699,32 +711,15 @@ class EnMangaCore {
     return s.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
   }
 
-  static List<AnimeModel> _merge(
-      List<AnimeModel> dex, List<AnimeModel> wc) {
-    final byKey = <String, List<AnimeModel>>{};
-    for (final m in dex) {
-      byKey.putIfAbsent(_normalize(m.name), () => []).add(m);
-    }
-    for (final m in wc) {
-      final key = _normalize(m.name);
-      if (!byKey.containsKey(key)) {
-        byKey[key] = [m];
-      } else {
-        byKey[key]!.add(m);
+  static List<AnimeModel> _mergeAll(List<List<AnimeModel>> sources) {
+    final byKey = <String, AnimeModel>{};
+    for (final list in sources) {
+      for (final m in list) {
+        final key = _normalize(m.name);
+        byKey.putIfAbsent(key, () => m);
       }
     }
-    final result = <AnimeModel>[];
-    for (final entry in byKey.entries) {
-      final list = entry.value;
-      if (list.length == 1) {
-        result.add(list[0]);
-      } else {
-        final dexManga = list.firstWhere((m) => m.sourceId == 'mangadex',
-            orElse: () => list[0]);
-        result.add(dexManga);
-      }
-    }
-      return result;
+    return byKey.values.toList();
   }
 }
 
@@ -738,7 +733,7 @@ class ViMangaCore {
       ZetTruyenCore.getTrending(),
       TruyenQQCore.getTrending(),
     ]);
-    return _merge(results[0], results[1]);
+    return _mergeAll(results);
   }
 
   static Future<List<AnimeModel>> search(String query) async {
@@ -747,38 +742,22 @@ class ViMangaCore {
       ZetTruyenCore.search(query.trim()),
       TruyenQQCore.search(query.trim()),
     ]);
-    return _merge(results[0], results[1]);
+    return _mergeAll(results);
   }
 
   static String _normalize(String s) {
     return s.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
   }
 
-  static List<AnimeModel> _merge(
-      List<AnimeModel> zet, List<AnimeModel> qq) {
-    final byKey = <String, List<AnimeModel>>{};
-    for (final m in zet) {
-      byKey.putIfAbsent(_normalize(m.name), () => []).add(m);
-    }
-    for (final m in qq) {
-      final key = _normalize(m.name);
-      if (!byKey.containsKey(key)) {
-        byKey[key] = [m];
-      } else {
-        byKey[key]!.add(m);
+  static List<AnimeModel> _mergeAll(List<List<AnimeModel>> sources) {
+    final byKey = <String, AnimeModel>{};
+    for (final list in sources) {
+      for (final m in list) {
+        final key = _normalize(m.name);
+        byKey.putIfAbsent(key, () => m);
       }
     }
-    final result = <AnimeModel>[];
-    for (final entry in byKey.entries) {
-      final list = entry.value;
-      if (list.length == 1) {
-        result.add(list[0]);
-      } else {
-        result.add(list.firstWhere((m) => m.sourceId == 'truyenqq',
-            orElse: () => list[0]));
-      }
-    }
-    return result;
+    return byKey.values.toList();
   }
 }
 
@@ -825,6 +804,7 @@ class TruyenQQCore {
             thumbnail: cover.isNotEmpty ? cover : null,
             isManga: true,
             sourceId: 'truyenqq',
+            provider: 'truyenqq',
           ));
         }
       }
@@ -865,6 +845,7 @@ class TruyenQQCore {
             thumbnail: cover.isNotEmpty ? cover : null,
             isManga: true,
             sourceId: 'truyenqq',
+            provider: 'truyenqq',
           ));
         }
       }
