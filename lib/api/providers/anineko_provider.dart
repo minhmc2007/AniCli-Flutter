@@ -32,8 +32,9 @@ class AninekoProvider extends AnimeProvider {
     );
     if (!isHttpOk(res.statusCode)) throw Exception('Anineko search failed: ${res.statusCode}');
 
-    final body = jsonDecode(res.body) as Map<String, dynamic>;
-    final items = (body['results'] as List?) ?? [];
+    final decoded = jsonDecode(res.body);
+    final body = decoded is Map<String, dynamic> ? decoded : <String, dynamic>{};
+    final items = body['results'] is List ? body['results'] as List : [];
     if (items.isEmpty) throw Exception('No results for "$query"');
 
     return items.map<SelectionOption>((item) {

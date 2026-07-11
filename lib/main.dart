@@ -63,7 +63,7 @@ class AniCliApp extends StatelessWidget {
     return MaterialApp(
       title: 'AniCli Flutter',
       debugShowCheckedModeBanner: false,
-      locale: context.watch<SettingsProvider>().locale == AppLocale.vi ? const Locale('vi') : null,
+      locale: context.watch<SettingsProvider>().locale == AppLocale.vi ? const Locale('vi') : const Locale('en'),
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,

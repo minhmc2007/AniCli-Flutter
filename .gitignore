@@ -7,6 +7,7 @@
 *.swp
 .buildlog/
 .history
+--Frag*.part
 
 /manga-tui
 /curd

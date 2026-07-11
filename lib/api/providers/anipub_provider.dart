@@ -30,7 +30,8 @@ class AnipubProvider extends AnimeProvider {
     );
     if (!isHttpOk(res.statusCode)) throw Exception('Anipub search failed: ${res.statusCode}');
 
-    final items = jsonDecode(res.body) as List? ?? [];
+    final decoded = jsonDecode(res.body);
+    final items = decoded is List ? decoded : [];
     if (items.isEmpty) throw Exception('No results for "$query"');
 
     return items.map<SelectionOption>((item) {

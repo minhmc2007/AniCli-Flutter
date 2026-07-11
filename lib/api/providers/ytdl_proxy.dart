@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 
@@ -57,23 +58,31 @@ class YtdlProxy {
 
     debugPrint('[YtdlProxy] spawning yt-dlp $embedUrl');
 
+    late Process proc;
     try {
-      final proc = await Process.start('yt-dlp', args,
-          runInShell: true,
+      proc = await Process.start('yt-dlp', args,
           mode: ProcessStartMode.normal);
+      proc.stderr.drain();
 
       request.response.headers.set('Content-Type', 'video/mp4');
       request.response.headers.set('Transfer-Encoding', 'chunked');
       request.response.headers.set('Cache-Control', 'no-cache');
       request.response.statusCode = 200;
 
-      await request.response.addStream(proc.stdout);
-      final exitCode = await proc.exitCode;
-      debugPrint('[YtdlProxy] yt-dlp exit code: $exitCode');
+      await Future.wait([
+        request.response.addStream(proc.stdout),
+        proc.exitCode,
+      ]).timeout(Duration(seconds: 30), onTimeout: () {
+        proc.kill();
+        request.response.close();
+        throw TimeoutException('yt-dlp timed out');
+      });
 
+      debugPrint('[YtdlProxy] yt-dlp finished');
       try { await request.response.close(); } catch (_) {}
     } catch (e) {
       debugPrint('[YtdlProxy] yt-dlp failed: $e, falling back to direct pipe');
+      try { proc.kill(); } catch (_) {}
       await _pipeDirect(request, embedUrl);
     }
   }
