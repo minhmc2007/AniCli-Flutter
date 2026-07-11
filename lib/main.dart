@@ -1117,14 +1117,10 @@ class _InternalPlayerScreenState extends State<InternalPlayerScreen> {
   StreamEntry get _current => widget.urls[_urlIndex];
 
   bool _needsYtdlp(String url) {
-    // AllAnime embed/CDN URLs need yt-dlp
-    if (url.contains('ok.ru/') ||
-        url.contains('okcdn.ru') ||
-        url.contains('mp4upload.com') ||
-        url.contains('allanime.uns.bio') ||
-        url.contains('bysekoze.com')) return true;
-    // Also proxy if it has embed patterns
-    if (url.contains('/embed') || url.contains('/e/')) return true;
+    // Resolved direct video URLs — let mpv handle directly
+    if (url.endsWith('.mp4') || url.endsWith('.webm') || url.endsWith('.mkv') || url.endsWith('.ts')) return false;
+    // Embed pages that need yt-dlp extraction
+    if (url.contains('/embed') || url.contains('/e/') || url.contains('ok.ru/videoembed')) return true;
     return false;
   }
 
