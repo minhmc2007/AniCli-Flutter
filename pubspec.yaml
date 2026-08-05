@@ -33,7 +33,7 @@ dependencies:
   flutter_markdown_plus: ^1.0.7
 
   # Permissions (for Android/iOS)
-  permission_handler: ^12.0.1
+  permission_handler: ^13.0.0
   path_provider: ^2.1.1
   open_file: ^4.0.0
   crypto: ^3.0.3
