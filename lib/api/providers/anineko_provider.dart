@@ -22,6 +22,49 @@ class AninekoProvider extends AnimeProvider {
       };
 
   @override
+  Future<List<SelectionOption>> getTrending(String mode) async {
+    final res = await http.get(
+      Uri.parse('$_baseUrl/browse'),
+      headers: {'User-Agent': _userAgent, 'Referer': '$_baseUrl/'},
+    );
+    if (!isHttpOk(res.statusCode)) {
+      throw Exception('Anineko browse failed: ${res.statusCode}');
+    }
+
+    final items = <SelectionOption>[];
+    final thumbMatches = RegExp(
+      r'<a class="nv-anime-thumb[^"]*" href="/watch/([^"]+)"[^>]*>(.*?)</a>',
+      dotAll: true,
+    ).allMatches(res.body);
+
+    for (final m in thumbMatches) {
+      final slug = m.group(1)!.trim();
+      if (slug.isEmpty) continue;
+      final block = m.group(2)!;
+      final imgMatch = RegExp(
+        r'<img[^>]*src="([^"]+)"[^>]*alt="([^"]*)"',
+      ).firstMatch(block);
+      final title = imgMatch?.group(2) ?? slug;
+      final epMatch = RegExp(r'nv-stat-cc">CC\s*(\d+)').firstMatch(block);
+      final epCount = epMatch?.group(1);
+
+      final parts = <String>[title];
+      if (epCount != null) parts.add('$epCount eps');
+
+      items.add(SelectionOption(
+        key: slug,
+        label: parts.join(' · '),
+        title: title,
+        thumbnail: imgMatch?.group(1),
+        extraData: {'slug': slug, 'title': title},
+      ));
+    }
+
+    if (items.isEmpty) throw Exception('No trending results');
+    return items;
+  }
+
+  @override
   Future<List<SelectionOption>> searchAnime(String query, String mode) async {
     query = query.trim();
     if (query.isEmpty) throw Exception('Empty search query');
@@ -124,6 +167,8 @@ class AninekoProvider extends AnimeProvider {
       final embedUrl = m.group(1)!;
       if (results.containsKey(embedUrl)) continue;
 
+      String? subtitle = _subtitleFromEmbedUrl(embedUrl);
+
       try {
         final embedRes = await http.get(
           Uri.parse(embedUrl),
@@ -137,8 +182,6 @@ class AninekoProvider extends AnimeProvider {
           "(https?://[^\"';<>&\\s]+\\.m3u8[^\"';<>&\\s]*)",
         ).allMatches(embedBody);
 
-        String? subtitle;
-
         for (final m3u8Match in m3u8Matches) {
           final streamUrl = m3u8Match.group(1)!;
           if (!results.containsKey(streamUrl)) {
@@ -150,11 +193,11 @@ class AninekoProvider extends AnimeProvider {
           }
         }
 
-        final subUrl = await _resolveAninekoSubtitle(embedBody);
-        if (subUrl != null && results.isNotEmpty) {
+        final bodySub = await _resolveAninekoSubtitle(embedBody);
+        if (bodySub != null && results.isNotEmpty) {
           results.updateAll((k, v) => StreamPlaybackHint(
                 referrer: v.referrer,
-                subtitle: subUrl,
+                subtitle: bodySub,
                 extraHeaders: v.extraHeaders,
               ));
         }
@@ -177,6 +220,15 @@ class AninekoProvider extends AnimeProvider {
 
     if (results.isEmpty) throw Exception('No playable streams found');
     return results;
+  }
+
+  String? _subtitleFromEmbedUrl(String embedUrl) {
+    try {
+      final params = Uri.parse(embedUrl).queryParameters;
+      final sub = params['sub'] ?? params['caption_1'] ?? params['caption'];
+      if (sub != null && sub.trim().isNotEmpty) return sub.trim();
+    } catch (_) {}
+    return null;
   }
 
   Future<String?> _resolveAninekoSubtitle(String embedBody) async {

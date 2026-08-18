@@ -8,7 +8,6 @@ import 'package:encrypt/encrypt.dart' as encrypt;
 
 import 'manga.dart' show AnimeModel;
 import 'providers/provider_base.dart';
-import 'providers/senshi_provider.dart';
 import 'providers/anipub_provider.dart';
 import 'providers/anineko_provider.dart';
 import 'providers/allanime_provider.dart';
@@ -571,7 +570,6 @@ class ViAnimeCore {
 
 class ProviderCoordinator {
   static final ProviderRegistry _registry = ProviderRegistry()
-    ..register(SenshiProvider())
     ..register(AnipubProvider())
     ..register(AninekoProvider())
     ..register(AllAnimeProvider())

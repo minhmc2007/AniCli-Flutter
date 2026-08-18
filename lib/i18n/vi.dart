@@ -113,7 +113,7 @@ const Map<String, String> viStrings = {
   'choose_source': 'Chọn nguồn Anime',
   'choose_source_sub': 'Chọn ngôn ngữ nội dung anime ưa thích',
   'source_en_title': 'Tiếng Anh',
-  'source_en_sub': 'Đa nhà cung cấp · Senshi · Anipub · Anineko · AllAnime · Animepahe',
+  'source_en_sub': 'Đa nhà cung cấp · Anipub · Anineko · AllAnime',
   'source_vi_title': 'Tiếng Việt',
   'source_vi_sub': 'PhimAPI · Vietsub',
 

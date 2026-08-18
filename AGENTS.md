@@ -37,7 +37,7 @@ Single-package Flutter app (`name: animeclient`), no monorepo tooling. SDK `>=3.
 | `lib/main.dart` (~3000+ lines) | Monolithic — app shell, navigation, onboarding, all UI components (browse, reader, detail views, settings, players) |
 | `lib/api/manga.dart` | Manga cores: MangaDex, ZetTruyen, WeebCentral, TruyenQQ + EnMangaCore/ViMangaCore aggregators |
 | `lib/api/anime.dart` | Anime cores: AniCore (AllAnime), ViAnimeCore (OPhim), HentaiVietsubCore + ProviderCoordinator (new provider stack) |
-| `lib/api/providers/` | Provider-based anime sources: Senshi, Anipub, Anineko, AllAnime, Animepahe — registered in `ProviderRegistry` |
+| `lib/api/providers/` | Provider-based anime sources: Anipub, Anineko, AllAnime, Animepahe — registered in `ProviderRegistry` (Senshi removed 2026-08, domain dead; Animepahe kept but removed from default stack, Cloudflare-walled) |
 | `lib/user_provider.dart` | History, favorites, backup/restore (SharedPreferences-backed) |
 | `lib/i18n.dart` + `lib/i18n/` | Manual i18n (no Flutter intl), EN + VI string maps |
 

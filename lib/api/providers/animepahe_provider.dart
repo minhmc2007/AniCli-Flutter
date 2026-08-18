@@ -31,7 +31,10 @@ class AnimepaheProvider extends AnimeProvider {
       headers: _headers,
     );
     if (!isHttpOk(res.statusCode)) {
-      throw Exception('Animepahe search failed: ${res.statusCode}');
+      throw Exception(
+        'Animepahe search failed: ${res.statusCode} '
+        '(blocked by Cloudflare challenge)',
+      );
     }
 
     final data = jsonDecode(res.body) as Map<String, dynamic>;

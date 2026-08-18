@@ -20,6 +20,36 @@ class AnipubProvider extends AnimeProvider {
       };
 
   @override
+  Future<List<SelectionOption>> getTrending(String mode) async {
+    final res = await http.get(
+      Uri.parse('$_baseUrl/'),
+      headers: _headers,
+    );
+    if (!isHttpOk(res.statusCode)) {
+      throw Exception('Anipub trending failed: ${res.statusCode}');
+    }
+
+    final items = <SelectionOption>[];
+    final linkMatches = RegExp(
+      r'href="/AniPlayer/(\d+)/0">\s*<span class="ft-tag">([^<]+)</span>',
+    ).allMatches(res.body);
+
+    for (final m in linkMatches) {
+      final id = m.group(1)!;
+      final title = m.group(2)!.trim();
+      items.add(SelectionOption(
+        key: id,
+        label: title,
+        title: title,
+        extraData: {'slug': id, 'title': title, 'id': int.tryParse(id) ?? 0},
+      ));
+    }
+
+    if (items.isEmpty) throw Exception('No trending results');
+    return items;
+  }
+
+  @override
   Future<List<SelectionOption>> searchAnime(String query, String mode) async {
     query = query.trim();
     if (query.isEmpty) throw Exception('Empty search query');
@@ -38,12 +68,13 @@ class AnipubProvider extends AnimeProvider {
       final slug = (item['finder'] as String? ?? '').trim();
       final title = (item['Name'] as String? ?? '').trim();
       final id = item['Id'] as int? ?? 0;
+      final image = item['Image'] as String? ?? '';
 
       return SelectionOption(
         key: id > 0 ? id.toString() : slug,
         label: title,
         title: title,
-        thumbnail: item['Image'] as String?,
+        thumbnail: image.contains('noitatnemucod.net') ? null : image,
         extraData: {
           'slug': slug,
           'title': title,
@@ -101,7 +132,7 @@ class AnipubProvider extends AnimeProvider {
 
     final html = res.body;
     final iframeMatch = RegExp(
-      r'<iframe[^>]*src="https://www\.anipub\.xyz/video/(\d+)/(sub|dub)"',
+      r'<iframe[^>]*src=\s*"?https?://(?:www\.)?anipub\.xyz/video/(\d+)/(sub|dub)',
       caseSensitive: false,
     ).firstMatch(html);
     if (iframeMatch == null) throw Exception('Video iframe not found');
@@ -110,8 +141,8 @@ class AnipubProvider extends AnimeProvider {
     final videoLang = iframeMatch.group(2)!;
 
     final videoRes = await http.get(
-      Uri.parse('https://www.anipub.xyz/video/$videoId/$videoLang'),
-      headers: _headers,
+      Uri.parse('$_baseUrl/video/$videoId/$videoLang'),
+      headers: {..._headers, 'Referer': '$_baseUrl/AniPlayer/$slug/$epIndex'},
     );
     if (!isHttpOk(videoRes.statusCode)) {
       throw Exception('Anipub video page failed: ${videoRes.statusCode}');
@@ -119,12 +150,58 @@ class AnipubProvider extends AnimeProvider {
 
     final videoHtml = videoRes.body;
     final megaMatch = RegExp(
-      r'<iframe[^>]*src="(https://megaplay\.buzz[^"]+)"',
+      r'''<iframe[^>]*src=\s*"?(https://megaplay\.buzz/[^\s"']+)''',
       caseSensitive: false,
     ).firstMatch(videoHtml);
     if (megaMatch == null) throw Exception('MegaPlay iframe not found');
 
     final megaUrl = megaMatch.group(1)!;
-    return {megaUrl: StreamPlaybackHint(referrer: 'https://www.anipub.xyz/')};
+
+    final megaRes = await http.get(
+      Uri.parse(megaUrl),
+      headers: {..._headers, 'Referer': '$_baseUrl/video/$videoId/$videoLang'},
+    );
+    if (!isHttpOk(megaRes.statusCode)) {
+      throw Exception('MegaPlay page failed: ${megaRes.statusCode}');
+    }
+
+    final dataIdMatch = RegExp(r'data-id="(\d+)"').firstMatch(megaRes.body);
+    if (dataIdMatch == null) throw Exception('MegaPlay data-id not found');
+
+    final sourcesRes = await http.get(
+      Uri.parse('https://megaplay.buzz/stream/getSources?id=${dataIdMatch.group(1)}'),
+      headers: {
+        'User-Agent': _userAgent,
+        'Referer': 'https://megaplay.buzz/',
+        'X-Requested-With': 'XMLHttpRequest',
+      },
+    );
+    if (!isHttpOk(sourcesRes.statusCode)) {
+      throw Exception('MegaPlay getSources failed: ${sourcesRes.statusCode}');
+    }
+
+    final sources = jsonDecode(sourcesRes.body) as Map<String, dynamic>;
+    final streamUrl = ((sources['sources'] as Map<String, dynamic>?)?['file'] as String? ?? '')
+        .trim();
+    if (streamUrl.isEmpty) throw Exception('No stream URL in MegaPlay sources');
+
+    String? subtitle;
+    final tracks = sources['tracks'] as List? ?? [];
+    for (final track in tracks) {
+      if (track is! Map) continue;
+      final file = (track['file'] as String? ?? '').trim();
+      if (file.isNotEmpty) {
+        subtitle = file;
+        break;
+      }
+    }
+
+    return {
+      streamUrl: StreamPlaybackHint(
+        referrer: 'https://megaplay.buzz/',
+        subtitle: subtitle,
+        extraHeaders: {'User-Agent': _userAgent},
+      ),
+    };
   }
 }

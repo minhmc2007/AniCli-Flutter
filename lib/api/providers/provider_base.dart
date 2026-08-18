@@ -207,10 +207,8 @@ String makeQualifiedId(Map<String, dynamic>? extraData, String key, String defau
 
 const List<String> defaultProviderStack = [
   'allanime',
-  'senshi',
   'anipub',
   'anineko',
-  'animepahe',
 ];
 
 // ───────────────────────────────────────────────────────────────
