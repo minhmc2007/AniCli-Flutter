@@ -148,7 +148,7 @@ class HentaiVietsubCore {
 
       String? videoId;
       final srcMatches =
-          RegExp(r'''data-source=["']([^"']*videos/([a-fA-F0-9]{24}))["']''')
+          RegExp(r'''data-source=["']([^"']*videos/([a-fA-F0-9]{20,32}))["']''')
               .allMatches(res.body);
       for (final m in srcMatches) {
         videoId = m.group(2);
@@ -156,13 +156,14 @@ class HentaiVietsubCore {
       }
 
       if (videoId == null) {
-        final fallback = RegExp(r'videos/([a-fA-F0-9]{24})').firstMatch(res.body);
+        final fallback =
+            RegExp(r'videos/([a-fA-F0-9]{20,32})').firstMatch(res.body);
         if (fallback != null) videoId = fallback.group(1);
       }
 
       if (videoId == null) return null;
 
-      const cdnHosts = ['e.streamforester.com', 'byzamlan.top'];
+      const cdnHosts = ['glagbo.com', 'e.streamforester.name'];
       const configHeaders = <String, String>{
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Content-Type': 'application/json',
