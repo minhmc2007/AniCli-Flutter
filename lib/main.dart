@@ -31,8 +31,8 @@ import 'package:url_launcher/url_launcher.dart';
 import 'i18n.dart';
 
 // Global Definitions & App State
-const String kAppVersion = "1.9.0 Developer Preview";
-const String kBuildNumber = "190";
+const String kAppVersion = "1.9.1";
+const String kBuildNumber = "191";
 const kColorCream = Color(0xFFFEEAC9);
 const kColorPeach = Color(0xFFFFCDC9);
 const kColorSoftPink = Color(0xFFFDACAC);
