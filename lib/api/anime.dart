@@ -10,7 +10,7 @@ import 'manga.dart' show AnimeModel;
 import 'providers/provider_base.dart';
 import 'providers/anipub_provider.dart';
 import 'providers/anineko_provider.dart';
-import 'providers/allanime_provider.dart';
+import 'providers/anidb_provider.dart';
 import 'providers/animepahe_provider.dart';
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -27,7 +27,7 @@ extension AnimeSourceX on AnimeSource {
   }
 
   String get description {
-    if (this == AnimeSource.en) return 'AllAnime · Sub';
+    if (this == AnimeSource.en) return 'AniDB · Sub';
     if (this == AnimeSource.vi) return 'PhimAPI · Vietsub';
     return 'HentaiVietsub · Vietsub';
   }
@@ -573,7 +573,7 @@ class ProviderCoordinator {
   static final ProviderRegistry _registry = ProviderRegistry()
     ..register(AnipubProvider())
     ..register(AninekoProvider())
-    ..register(AllAnimeProvider())
+    ..register(AnidbProvider())
     ..register(AnimepaheProvider());
 
   static ProviderRegistry get registry => _registry;

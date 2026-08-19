@@ -113,7 +113,7 @@ const Map<String, String> enStrings = {
   'choose_source': 'Choose Anime Source',
   'choose_source_sub': 'Select your preferred anime content language',
   'source_en_title': 'English',
-  'source_en_sub': 'Multi-Provider · Anipub · Anineko · AllAnime',
+  'source_en_sub': 'Multi-Provider · AniDB · Anipub · Anineko',
   'source_vi_title': 'Tiếng Việt',
   'source_vi_sub': 'PhimAPI · Vietsub',
 

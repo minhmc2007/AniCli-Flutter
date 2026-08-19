@@ -99,7 +99,7 @@ extension AnimeSourceX on AnimeSource {
     return 'NSFW (18+)';
   }
   String get description {
-    if (this == AnimeSource.en) return 'Anipub · Anineko · AllAnime';
+    if (this == AnimeSource.en) return 'AniDB · Anipub · Anineko';
     if (this == AnimeSource.vi) return 'PhimAPI · Vietsub';
     return 'HentaiVietsub · Vietsub';
   }
