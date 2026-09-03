@@ -1715,10 +1715,10 @@ class _SettingsViewState extends State<SettingsView> {
         try {
           final json = await BackupService.exportData();
           final bytes = Uint8List.fromList(utf8.encode(json));
-          final path = await FilePicker.saveFile(dialogTitle: context.tr('save_backup'), fileName: "anicli_backup.json", type: FileType.custom, allowedExtensions: ['json'], bytes: bytes);
-          if (path != null) {
+          final uri = await FilePicker.saveFile(dialogTitle: context.tr('save_backup'), fileName: "anicli_backup.json", type: FileType.custom, allowedExtensions: ['json'], bytes: bytes);
+          if (uri != null) {
             if (!Platform.isAndroid && !Platform.isIOS) {
-              await File(path).writeAsString(json);
+              await File(uri.toFilePath()).writeAsString(json);
             }
             if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(context.tr('backup_saved')), backgroundColor: Colors.green));
           }
@@ -1730,8 +1730,8 @@ class _SettingsViewState extends State<SettingsView> {
       _cd(LucideIcons.upload, context.tr('restore_data'), context.tr('setting_restore_sub'), onTap: () async {
         try {
           final result = await FilePicker.pickFiles(type: FileType.custom, allowedExtensions: ['json']);
-          if (result == null || result.files.isEmpty) return;
-          final json = await File(result.files.first.path!).readAsString();
+          if (result == null || result.isEmpty) return;
+          final json = await File(result.first.path!).readAsString();
           final ok = await BackupService.importData(json);
           if (mounted) {
             if (ok) {
